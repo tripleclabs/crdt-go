@@ -1,239 +1,117 @@
 package crdt
 
-// AWLWWMap is an add-wins last-write-wins map CRDT. It extends [LWWMap]
-// semantics with an add-wins bias: when a put and remove occur concurrently,
-// the put wins. This is achieved by recording a causal context (vector clock
-// snapshot) in each tombstone. A put dominates a tombstone only if the put's
-// dot is NOT covered by the tombstone's context.
+// AWLWWMap stores key → (value, [Dot]) entries and key → (Dot, context VClock)
+// tombstones, backed by a [Backend]. The tombstone context is the causal
+// snapshot at time of removal — used by the replica layer for add-wins logic.
 //
-// The zero value is not usable; create instances with [NewAWLWWMap].
-type AWLWWMap struct {
-	replica    ReplicaID
-	entries    map[string]lwwMapEntry // reuses {Value, Dot}
-	tombstones map[string]awTombstone
-	vclock     VClock
+// This is pure storage — no clocks, no merge logic, no delta encoding.
+type AWLWWMap[V any] struct {
+	codec   Codec[V]
+	backend Backend
 }
 
-type awTombstone struct {
-	Dot     Dot
-	Context VClock // vclock snapshot at time of removal
-}
-
-// NewAWLWWMap returns a new AWLWWMap owned by the given replica.
-func NewAWLWWMap(replica ReplicaID) *AWLWWMap {
-	return &AWLWWMap{
-		replica:    replica,
-		entries:    make(map[string]lwwMapEntry),
-		tombstones: make(map[string]awTombstone),
-		vclock:     NewVClock(),
+// NewAWLWWMap returns an initialized AWLWWMap.
+func NewAWLWWMap[V any](codec Codec[V], opts ...Option) *AWLWWMap[V] {
+	o := applyOptions(opts)
+	b := o.backend
+	if b == nil {
+		b = NewMemoryBackend()
 	}
+	return &AWLWWMap[V]{codec: codec, backend: b}
 }
 
-// Put sets a key-value pair and returns the new state with a [Delta].
-// Any tombstone for the key is cleared. The receiver is not modified.
-func (m *AWLWWMap) Put(key string, value any) (*AWLWWMap, *Delta) {
-	newVC := m.vclock.Increment(m.replica)
-	dot := Dot{Replica: m.replica, Counter: newVC.Get(m.replica)}
-
-	newEntries := cloneAWEntries(m.entries)
-	newEntries[key] = lwwMapEntry{Value: value, Dot: dot}
-	newTombstones := cloneAWTombstones(m.tombstones)
-	delete(newTombstones, key)
-
-	next := &AWLWWMap{
-		replica:    m.replica,
-		entries:    newEntries,
-		tombstones: newTombstones,
-		vclock:     newVC,
-	}
-
-	delta := &AWLWWMap{
-		replica:    m.replica,
-		entries:    map[string]lwwMapEntry{key: {Value: value, Dot: dot}},
-		tombstones: make(map[string]awTombstone),
-		vclock:     VClock{m.replica: dot.Counter},
-	}
-	return next, &Delta{Type: TypeAWLWWMap, State: delta}
-}
-
-// Remove marks a key as deleted with a tombstone that includes the current
-// causal context. Returns the new state with a [Delta]. The receiver is not
-// modified.
-func (m *AWLWWMap) Remove(key string) (*AWLWWMap, *Delta) {
-	newVC := m.vclock.Increment(m.replica)
-	dot := Dot{Replica: m.replica, Counter: newVC.Get(m.replica)}
-
-	newEntries := cloneAWEntries(m.entries)
-	delete(newEntries, key)
-	newTombstones := cloneAWTombstones(m.tombstones)
-	newTombstones[key] = awTombstone{Dot: dot, Context: m.vclock.Clone()}
-
-	next := &AWLWWMap{
-		replica:    m.replica,
-		entries:    newEntries,
-		tombstones: newTombstones,
-		vclock:     newVC,
-	}
-
-	delta := &AWLWWMap{
-		replica:    m.replica,
-		entries:    make(map[string]lwwMapEntry),
-		tombstones: map[string]awTombstone{key: {Dot: dot, Context: m.vclock.Clone()}},
-		vclock:     VClock{m.replica: dot.Counter},
-	}
-	return next, &Delta{Type: TypeAWLWWMap, State: delta}
-}
-
-// Get returns the value for key and whether it exists (not tombstoned).
-func (m *AWLWWMap) Get(key string) (any, bool) {
-	e, ok := m.entries[key]
-	if !ok {
-		return nil, false
-	}
-	return e.Value, true
-}
-
-// Value returns the map contents as a map[string]any.
-func (m *AWLWWMap) Value() any {
-	return m.Map()
-}
-
-// Map returns the map contents as a typed map[string]any.
-func (m *AWLWWMap) Map() map[string]any {
-	out := make(map[string]any, len(m.entries))
-	for k, e := range m.entries {
-		out[k] = e.Value
-	}
-	return out
-}
-
-// Len returns the number of live entries.
-func (m *AWLWWMap) Len() int {
-	return len(m.entries)
-}
-
-// VClock returns the vector clock for this map.
-func (m *AWLWWMap) VClock() VClock {
-	return m.vclock.Clone()
-}
-
-// Merge merges a remote AWLWWMap state and returns the result. Add-wins
-// semantics: an entry dominates a tombstone if the entry's dot is NOT
-// covered by the tombstone's causal context. The receiver is not modified.
-func (m *AWLWWMap) Merge(other State) State {
-	o := other.(*AWLWWMap)
-	mergedVC := m.vclock.Merge(o.vclock)
-	mergedEntries := make(map[string]lwwMapEntry)
-	mergedTombstones := make(map[string]awTombstone)
-
-	// Collect all keys.
-	allKeys := make(map[string]struct{})
-	for k := range m.entries {
-		allKeys[k] = struct{}{}
-	}
-	for k := range m.tombstones {
-		allKeys[k] = struct{}{}
-	}
-	for k := range o.entries {
-		allKeys[k] = struct{}{}
-	}
-	for k := range o.tombstones {
-		allKeys[k] = struct{}{}
-	}
-
-	for k := range allKeys {
-		// Collect best entry from both sides.
-		var bestEntry lwwMapEntry
-		var hasBestEntry bool
-		if le, ok := m.entries[k]; ok {
-			bestEntry = le
-			hasBestEntry = true
-		}
-		if re, ok := o.entries[k]; ok {
-			if !hasBestEntry || DotGT(re.Dot, bestEntry.Dot) {
-				bestEntry = re
-				hasBestEntry = true
-			}
-		}
-
-		// Collect best tombstone from both sides.
-		var bestTombstone awTombstone
-		var hasBestTombstone bool
-		if lt, ok := m.tombstones[k]; ok {
-			bestTombstone = lt
-			hasBestTombstone = true
-		}
-		if rt, ok := o.tombstones[k]; ok {
-			if !hasBestTombstone || DotGT(rt.Dot, bestTombstone.Dot) {
-				bestTombstone = rt
-				hasBestTombstone = true
-			} else if hasBestTombstone {
-				// Merge contexts for same-level tombstones.
-				bestTombstone.Context = bestTombstone.Context.Merge(rt.Context)
-			}
-		}
-
-		if hasBestEntry && hasBestTombstone {
-			// Add-wins: entry dominates if its dot is NOT covered by
-			// the tombstone's causal context.
-			if dominatedByContext(bestEntry.Dot, bestTombstone.Context) {
-				mergedTombstones[k] = bestTombstone
-			} else {
-				mergedEntries[k] = bestEntry
-			}
-		} else if hasBestEntry {
-			mergedEntries[k] = bestEntry
-		} else if hasBestTombstone {
-			mergedTombstones[k] = bestTombstone
-		}
-	}
-
-	return &AWLWWMap{
-		replica:    m.replica,
-		entries:    mergedEntries,
-		tombstones: mergedTombstones,
-		vclock:     mergedVC,
-	}
-}
-
-// dominatedByContext reports whether the dot is covered by the causal context
-// — i.e., the context has seen this dot's replica at or beyond this counter.
-func dominatedByContext(d Dot, ctx VClock) bool {
-	return ctx.Get(d.Replica) >= d.Counter
-}
-
-// CRDTType returns [TypeAWLWWMap].
-func (m *AWLWWMap) CRDTType() TypeID {
-	return TypeAWLWWMap
-}
-
-// MarshalBinary encodes the AWLWWMap into a binary format.
-func (m *AWLWWMap) MarshalBinary() ([]byte, error) {
-	return gobEncode(m.replica, m.entries, m.tombstones, map[ReplicaID]uint64(m.vclock))
-}
-
-// UnmarshalBinary decodes an AWLWWMap from binary format.
-func (m *AWLWWMap) UnmarshalBinary(data []byte) error {
-	var vc map[ReplicaID]uint64
-	if err := gobDecode(data, &m.replica, &m.entries, &m.tombstones, &vc); err != nil {
+// Put stores a key-value pair with the given dot. Removes any tombstone.
+func (m *AWLWWMap[V]) Put(key string, value V, dot Dot) error {
+	valBytes, err := m.codec.Encode(value)
+	if err != nil {
 		return err
 	}
-	m.vclock = VClock(vc)
+	m.backend.PutEntry(key, valBytes, EncodeDot(dot))
+	m.backend.DeleteTombstone(key)
 	return nil
 }
 
-func cloneAWEntries(m map[string]lwwMapEntry) map[string]lwwMapEntry {
-	out := make(map[string]lwwMapEntry, len(m))
-	for k, e := range m {
-		out[k] = e
+// PutBytes stores pre-encoded value bytes.
+func (m *AWLWWMap[V]) PutBytes(key string, valBytes []byte, dot Dot) {
+	m.backend.PutEntry(key, valBytes, EncodeDot(dot))
+	m.backend.DeleteTombstone(key)
+}
+
+// Remove tombstones a key with the given dot and causal context.
+func (m *AWLWWMap[V]) Remove(key string, dot Dot, context VClock) {
+	m.backend.DeleteEntry(key)
+	m.backend.PutTombstone(key, encodeAWTombstone(dot, context))
+}
+
+// Get returns the value, its dot, and whether the key exists.
+func (m *AWLWWMap[V]) Get(key string) (V, Dot, bool) {
+	var zero V
+	valBytes, metaBytes, ok := m.backend.GetEntry(key)
+	if !ok {
+		return zero, Dot{}, false
 	}
+	v, err := m.codec.Decode(valBytes)
+	if err != nil {
+		return zero, Dot{}, false
+	}
+	dot, _ := DecodeDot(metaBytes)
+	return v, dot, true
+}
+
+// GetBytes returns raw value bytes, dot, and whether exists.
+func (m *AWLWWMap[V]) GetBytes(key string) ([]byte, Dot, bool) {
+	valBytes, metaBytes, ok := m.backend.GetEntry(key)
+	if !ok {
+		return nil, Dot{}, false
+	}
+	dot, _ := DecodeDot(metaBytes)
+	return valBytes, dot, true
+}
+
+// GetTombstone returns the dot and causal context for a tombstoned key.
+func (m *AWLWWMap[V]) GetTombstone(key string) (Dot, VClock, bool) {
+	metaBytes, ok := m.backend.GetTombstone(key)
+	if !ok {
+		return Dot{}, nil, false
+	}
+	dot, ctx := decodeAWTombstone(metaBytes)
+	return dot, ctx, true
+}
+
+// Range calls fn for each live entry.
+func (m *AWLWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
+	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
+		v, err := m.codec.Decode(valBytes)
+		if err != nil {
+			return true
+		}
+		dot, _ := DecodeDot(metaBytes)
+		return fn(key, v, dot)
+	})
+}
+
+// RangeTombstones calls fn for each tombstone.
+func (m *AWLWWMap[V]) RangeTombstones(fn func(key string, dot Dot, context VClock) bool) {
+	m.backend.RangeTombstones(func(key string, metaBytes []byte) bool {
+		dot, ctx := decodeAWTombstone(metaBytes)
+		return fn(key, dot, ctx)
+	})
+}
+
+// Len returns the number of live entries.
+func (m *AWLWWMap[V]) Len() int { return m.backend.EntryLen() }
+
+func encodeAWTombstone(d Dot, ctx VClock) []byte {
+	dotBytes := EncodeDot(d)
+	ctxBytes := EncodeVClock(ctx)
+	out := make([]byte, len(dotBytes)+len(ctxBytes))
+	copy(out, dotBytes)
+	copy(out[len(dotBytes):], ctxBytes)
 	return out
 }
 
-func cloneAWTombstones(m map[string]awTombstone) map[string]awTombstone {
-	out := make(map[string]awTombstone, len(m))
-	for k, t := range m {
-		out[k] = awTombstone{Dot: t.Dot, Context: t.Context.Clone()}
-	}
-	return out
+func decodeAWTombstone(b []byte) (Dot, VClock) {
+	d, _ := DecodeDot(b)
+	ctx, _ := DecodeVClock(b[16:])
+	return d, ctx
 }

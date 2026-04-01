@@ -1,135 +1,97 @@
 package crdt
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
-// GList is a grow-only list CRDT. Elements can only be appended, never
-// removed. Each element is tagged with the replica and counter at the time
-// of append, providing causal ordering. Duplicate items (same replica and
-// counter) are deduplicated during merge.
+// GList stores append-only items, each with a [Dot], backed by a [Backend].
+// Items are keyed by "replica:counter" for deduplication. Retrieval is in
+// causal order (sorted by counter, then replica ID).
 //
-// The zero value is not usable; create instances with [NewGList].
-type GList struct {
-	replica ReplicaID
-	items   []gListItem
-	vclock  VClock
+// This is pure storage — no clocks, no merge logic, no delta encoding.
+type GList[V any] struct {
+	codec   Codec[V]
+	backend Backend
 }
 
-type gListItem struct {
-	Value   any
-	Replica ReplicaID
-	Counter uint64
-}
-
-// NewGList returns a new GList owned by the given replica.
-func NewGList(replica ReplicaID) *GList {
-	return &GList{
-		replica: replica,
-		vclock:  NewVClock(),
+// NewGList returns an initialized GList.
+func NewGList[V any](codec Codec[V], opts ...Option) *GList[V] {
+	o := applyOptions(opts)
+	b := o.backend
+	if b == nil {
+		b = NewMemoryBackend()
 	}
+	return &GList[V]{codec: codec, backend: b}
 }
 
-// Append adds a value to the end of the list and returns the new state with
-// a [Delta]. The receiver is not modified.
-func (l *GList) Append(value any) (*GList, *Delta) {
-	newVC := l.vclock.Increment(l.replica)
-	counter := newVC.Get(l.replica)
-
-	item := gListItem{Value: value, Replica: l.replica, Counter: counter}
-	newItems := make([]gListItem, len(l.items)+1)
-	copy(newItems, l.items)
-	newItems[len(l.items)] = item
-
-	next := &GList{replica: l.replica, items: newItems, vclock: newVC}
-
-	delta := &GList{
-		replica: l.replica,
-		items:   []gListItem{item},
-		vclock:  VClock{l.replica: counter},
-	}
-	return next, &Delta{Type: TypeGList, State: delta}
-}
-
-// Value returns the list items as a []any in causal order (sorted by
-// counter, then replica ID for deterministic ordering of concurrent appends).
-func (l *GList) Value() any {
-	return l.Items()
-}
-
-// Items returns the list items as a typed []any slice in causal order.
-func (l *GList) Items() []any {
-	sorted := make([]gListItem, len(l.items))
-	copy(sorted, l.items)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Counter != sorted[j].Counter {
-			return sorted[i].Counter < sorted[j].Counter
-		}
-		return sorted[i].Replica < sorted[j].Replica
-	})
-	out := make([]any, len(sorted))
-	for i, item := range sorted {
-		out[i] = item.Value
-	}
-	return out
-}
-
-// Len returns the number of items in the list.
-func (l *GList) Len() int {
-	return len(l.items)
-}
-
-// VClock returns the vector clock for this list.
-func (l *GList) VClock() VClock {
-	return l.vclock.Clone()
-}
-
-// Merge merges a remote GList state and returns the result. Items are
-// deduplicated by (replica, counter) and the vclocks are merged. The
-// receiver is not modified.
-func (l *GList) Merge(other State) State {
-	o := other.(*GList)
-	mergedVC := l.vclock.Merge(o.vclock)
-
-	type itemKey struct {
-		replica ReplicaID
-		counter uint64
-	}
-	seen := make(map[itemKey]struct{}, len(l.items))
-	merged := make([]gListItem, 0, len(l.items)+len(o.items))
-
-	for _, item := range l.items {
-		k := itemKey{item.Replica, item.Counter}
-		if _, ok := seen[k]; !ok {
-			seen[k] = struct{}{}
-			merged = append(merged, item)
-		}
-	}
-	for _, item := range o.items {
-		k := itemKey{item.Replica, item.Counter}
-		if _, ok := seen[k]; !ok {
-			seen[k] = struct{}{}
-			merged = append(merged, item)
-		}
-	}
-
-	return &GList{replica: l.replica, items: merged, vclock: mergedVC}
-}
-
-// CRDTType returns [TypeGList].
-func (l *GList) CRDTType() TypeID {
-	return TypeGList
-}
-
-// MarshalBinary encodes the GList into a binary format.
-func (l *GList) MarshalBinary() ([]byte, error) {
-	return gobEncode(l.replica, l.items, map[ReplicaID]uint64(l.vclock))
-}
-
-// UnmarshalBinary decodes a GList from binary format.
-func (l *GList) UnmarshalBinary(data []byte) error {
-	var vc map[ReplicaID]uint64
-	if err := gobDecode(data, &l.replica, &l.items, &vc); err != nil {
+// Append stores a value with the given dot. The item is keyed by
+// "replica:counter" for deduplication.
+func (l *GList[V]) Append(value V, dot Dot) error {
+	valBytes, err := l.codec.Encode(value)
+	if err != nil {
 		return err
 	}
-	l.vclock = VClock(vc)
+	key := fmt.Sprintf("%d:%d", dot.Replica, dot.Counter)
+	l.backend.PutEntry(key, valBytes, EncodeDot(dot))
 	return nil
 }
+
+// AppendBytes stores pre-encoded value bytes with the given dot.
+func (l *GList[V]) AppendBytes(valBytes []byte, dot Dot) {
+	key := fmt.Sprintf("%d:%d", dot.Replica, dot.Counter)
+	l.backend.PutEntry(key, valBytes, EncodeDot(dot))
+}
+
+// Has reports whether an item with the given dot exists.
+func (l *GList[V]) Has(dot Dot) bool {
+	key := fmt.Sprintf("%d:%d", dot.Replica, dot.Counter)
+	_, _, ok := l.backend.GetEntry(key)
+	return ok
+}
+
+// Items returns all items in causal order (counter ascending, then
+// replica ID ascending for ties).
+func (l *GList[V]) Items() ([]V, error) {
+	type item struct {
+		value V
+		dot   Dot
+	}
+	items := make([]item, 0, l.backend.EntryLen())
+	var decErr error
+	l.backend.RangeEntries(func(_ string, valBytes []byte, metaBytes []byte) bool {
+		v, err := l.codec.Decode(valBytes)
+		if err != nil {
+			decErr = err
+			return false
+		}
+		d, _ := DecodeDot(metaBytes)
+		items = append(items, item{value: v, dot: d})
+		return true
+	})
+	if decErr != nil {
+		return nil, decErr
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].dot.Counter != items[j].dot.Counter {
+			return items[i].dot.Counter < items[j].dot.Counter
+		}
+		return items[i].dot.Replica < items[j].dot.Replica
+	})
+	out := make([]V, len(items))
+	for i, it := range items {
+		out[i] = it.value
+	}
+	return out, nil
+}
+
+// Range calls fn for each item with raw bytes, in unspecified order.
+func (l *GList[V]) Range(fn func(valBytes []byte, dot Dot) bool) {
+	l.backend.RangeEntries(func(_ string, valBytes []byte, metaBytes []byte) bool {
+		d, _ := DecodeDot(metaBytes)
+		return fn(valBytes, d)
+	})
+}
+
+// Len returns the number of items.
+func (l *GList[V]) Len() int { return l.backend.EntryLen() }

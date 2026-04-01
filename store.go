@@ -1,89 +1,63 @@
 package crdt
 
-// EntryStore abstracts element and entry storage for collection CRDT types
-// (ORSet, ORMap, LWWMap, AWLWWMap, DeltaMap, GList). The default in-memory
-// implementation is [MapStore]. Providing a disk-backed implementation (e.g.,
-// backed by bbolt) enables CRDTs whose entries are too large for memory.
+// Backend abstracts entry storage for collection CRDT types (ORSet, ORMap,
+// LWWMap, AWLWWMap, GList). The default in-memory implementation
+// is [MemoryBackend]. Providing a disk-backed implementation (e.g., backed
+// by bbolt) enables CRDTs whose entries are too large for memory.
+//
+// Values are split into two byte slices: value (user data, opaque) and meta
+// (CRDT metadata like dots, encoded via [EncodeDot]/[EncodeDotMap]). This
+// separation allows merge operations to compare metadata without
+// deserializing potentially large user values.
+//
+// All operations mutate the backend in place. There is no Clone method —
+// backends are mutable stores, not value types.
 //
 // Implementations must be safe for sequential use but need not be safe for
 // concurrent use — concurrency control is the caller's responsibility.
-type EntryStore interface {
-	// Get retrieves the value for key. The second return value is false if
-	// the key does not exist.
-	Get(key string) ([]byte, bool)
+type Backend interface {
+	// GetEntry retrieves the value and metadata for key. Returns ok=false
+	// if the key does not exist.
+	GetEntry(key string) (value []byte, meta []byte, ok bool)
 
-	// Put stores value under key, overwriting any previous value.
-	Put(key string, value []byte)
+	// PutEntry stores value and metadata under key, overwriting any
+	// previous entry.
+	PutEntry(key string, value []byte, meta []byte)
 
-	// Delete removes the entry for key. It is a no-op if the key does not exist.
-	Delete(key string)
+	// DeleteEntry removes the entry for key. No-op if the key does not exist.
+	DeleteEntry(key string)
 
-	// Range calls fn for each entry in unspecified order. If fn returns false,
-	// iteration stops early.
-	Range(fn func(key string, value []byte) bool)
+	// RangeEntries calls fn for each entry in unspecified order. If fn
+	// returns false, iteration stops early.
+	RangeEntries(fn func(key string, value []byte, meta []byte) bool)
 
-	// Len returns the number of entries.
-	Len() int
-}
+	// EntryLen returns the number of entries.
+	EntryLen() int
 
-// MapStore is the default in-memory [EntryStore] backed by a plain Go map.
-// The zero value is ready to use.
-type MapStore struct {
-	m map[string][]byte
-}
+	// GetTombstone retrieves the metadata for a tombstoned key. Returns
+	// ok=false if no tombstone exists. Types without remove operations
+	// (GList, ORSet) may use a no-op implementation.
+	GetTombstone(key string) (meta []byte, ok bool)
 
-// NewMapStore returns an initialized [MapStore].
-func NewMapStore() *MapStore {
-	return &MapStore{m: make(map[string][]byte)}
-}
+	// PutTombstone stores tombstone metadata under key.
+	PutTombstone(key string, meta []byte)
 
-// Get retrieves the value for key.
-func (s *MapStore) Get(key string) ([]byte, bool) {
-	if s.m == nil {
-		return nil, false
-	}
-	v, ok := s.m[key]
-	return v, ok
-}
+	// DeleteTombstone removes the tombstone for key. No-op if none exists.
+	DeleteTombstone(key string)
 
-// Put stores value under key.
-func (s *MapStore) Put(key string, value []byte) {
-	if s.m == nil {
-		s.m = make(map[string][]byte)
-	}
-	s.m[key] = value
-}
+	// RangeTombstones calls fn for each tombstone in unspecified order.
+	// If fn returns false, iteration stops early.
+	RangeTombstones(fn func(key string, meta []byte) bool)
 
-// Delete removes the entry for key.
-func (s *MapStore) Delete(key string) {
-	if s.m == nil {
-		return
-	}
-	delete(s.m, key)
-}
-
-// Range calls fn for each entry. If fn returns false, iteration stops.
-func (s *MapStore) Range(fn func(key string, value []byte) bool) {
-	if s.m == nil {
-		return
-	}
-	for k, v := range s.m {
-		if !fn(k, v) {
-			return
-		}
-	}
-}
-
-// Len returns the number of entries.
-func (s *MapStore) Len() int {
-	return len(s.m)
+	// TombstoneLen returns the number of tombstones.
+	TombstoneLen() int
 }
 
 // Option configures a CRDT at construction time.
 type Option func(*options)
 
 type options struct {
-	store EntryStore
+	backend Backend
 }
 
 func applyOptions(opts []Option) options {
@@ -94,10 +68,10 @@ func applyOptions(opts []Option) options {
 	return o
 }
 
-// WithStore sets the [EntryStore] for a collection CRDT. If not provided,
-// the CRDT uses an in-memory [MapStore].
-func WithStore(s EntryStore) Option {
+// WithBackend sets the [Backend] for a collection CRDT. If not provided,
+// the CRDT uses an in-memory [MemoryBackend].
+func WithBackend(b Backend) Option {
 	return func(o *options) {
-		o.store = s
+		o.backend = b
 	}
 }

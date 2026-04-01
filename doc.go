@@ -1,40 +1,33 @@
-// Package crdt provides pure-Go implementations of Conflict-free Replicated
-// Data Types (CRDTs) with provably correct semantics.
+// Package crdt provides pure-Go CRDT data types and causality primitives.
 //
-// CRDTs are data structures that can be replicated across multiple nodes in a
-// distributed system and merged without coordination, guaranteeing eventual
-// consistency. Every merge operation in this library is commutative, associative,
-// and idempotent.
+// CRDT types in this package are pure typed storage — they read and write
+// a [Backend] with dot/dotmap metadata but contain no merge logic, no
+// clocks, and no delta encoding. The merge semantics and clock management
+// live in the replica layer (see the replica sub-package).
 //
 // # CRDT Types
 //
-// The library provides 10 CRDT types:
+//   - [GCounter]: Grow-only counter (replica → count)
+//   - [PNCounter]: Positive-negative counter
+//   - [LWWRegister]: Last-write-wins register (single value + dot)
+//   - [MVRegister]: Multi-value register (concurrent values + dots)
+//   - [LWWMap]: Last-write-wins map (key → value + dot, with tombstones)
+//   - [ORSet]: Observed-remove set (element → dotmap)
+//   - [ORMap]: Observed-remove map (key → value + dotmap)
+//   - [AWLWWMap]: Add-wins LWW map (tombstones carry causal context)
+//   - [GList]: Grow-only list (append-only, causal ordering)
 //
-//   - [GCounter]: Grow-only counter (increment only)
-//   - [PNCounter]: Positive-negative counter (increment and decrement)
-//   - [LWWRegister]: Last-write-wins register (single value, deterministic tie-breaking)
-//   - [MVRegister]: Multi-value register (preserves concurrent writes)
-//   - [ORSet]: Observed-remove set (add-wins semantics)
-//   - [GList]: Grow-only list (append only, causal ordering)
-//   - [ORMap]: Observed-remove map (add-wins keys)
-//   - [LWWMap]: Last-write-wins map (per-key LWW with tombstones)
-//   - [AWLWWMap]: Add-wins last-write-wins map (add-wins bias on concurrent add/remove)
-//   - [DeltaMap]: Typed nested CRDT map (each key holds a typed CRDT value)
+// # Causality Primitives
 //
-// # Design
-//
-// All CRDT types are plain value types with no internal synchronization. Mutations
-// return a new state and a [Delta] representing the minimal change — the original
-// value is never modified. This makes the types safe to use in concurrent code
-// when wrapped with the caller's own synchronization.
-//
-// Transport, membership, persistence, and process management are explicitly out
-// of scope. Consumers serialize deltas via [encoding.BinaryMarshaler] /
-// [encoding.BinaryUnmarshaler] and send them however they choose.
+//   - [Dot]: A single causal event (replica, counter)
+//   - [DotMap]: Compressed vector clock per element
+//   - [VClock]: Vector clock
+//   - [LocalClock]: Monotonic counter for a single replica
+//   - [ReceivedClock]: Tracks contiguous receipt per remote replica
 //
 // # Storage
 //
-// Collection types (sets, maps, lists) accept an optional [EntryStore] via
-// functional options. The default is an in-memory store. Providing a disk-backed
-// implementation (e.g., bbolt) enables CRDTs that are too large for memory.
+// Collection types use a pluggable [Backend] interface. The default
+// [MemoryBackend] uses in-memory Go maps. Disk-backed implementations
+// (e.g., bbolt) enable CRDTs that exceed memory.
 package crdt

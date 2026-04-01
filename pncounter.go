@@ -1,72 +1,43 @@
 package crdt
 
-// PNCounter is a positive-negative counter CRDT that supports both increment
-// and decrement operations. It is implemented as two [GCounter]-style maps:
-// one for positive counts and one for negative counts. The value is the
-// difference: sum(positive) - sum(negative).
+// PNCounter is a positive-negative counter. Two maps: positive and negative
+// counts per replica. Value = sum(positive) - sum(negative).
 //
-// The zero value is not usable; create instances with [NewPNCounter].
+// This is pure storage — no clocks, no merge logic.
 type PNCounter struct {
-	replica  ReplicaID
 	positive map[ReplicaID]uint64
 	negative map[ReplicaID]uint64
 }
 
-// NewPNCounter returns a new PNCounter owned by the given replica.
-func NewPNCounter(replica ReplicaID) *PNCounter {
+// NewPNCounter returns an initialized PNCounter.
+func NewPNCounter() *PNCounter {
 	return &PNCounter{
-		replica:  replica,
 		positive: make(map[ReplicaID]uint64),
 		negative: make(map[ReplicaID]uint64),
 	}
 }
 
-// Increment adds amount to the positive count for this replica and returns
-// the new state with a [Delta]. The receiver is not modified.
-func (c *PNCounter) Increment(amount uint64) (*PNCounter, *Delta) {
-	newPos := cloneMapU64(c.positive)
-	newPos[c.replica] += amount
-
-	next := &PNCounter{
-		replica:  c.replica,
-		positive: newPos,
-		negative: cloneMapU64(c.negative),
-	}
-
-	delta := &PNCounter{
-		replica:  c.replica,
-		positive: map[ReplicaID]uint64{c.replica: newPos[c.replica]},
-		negative: make(map[ReplicaID]uint64),
-	}
-	return next, &Delta{Type: TypePNCounter, State: delta}
+// SetPositive sets the positive count for a replica.
+func (c *PNCounter) SetPositive(replica ReplicaID, count uint64) {
+	c.positive[replica] = count
 }
 
-// Decrement adds amount to the negative count for this replica and returns
-// the new state with a [Delta]. The receiver is not modified.
-func (c *PNCounter) Decrement(amount uint64) (*PNCounter, *Delta) {
-	newNeg := cloneMapU64(c.negative)
-	newNeg[c.replica] += amount
-
-	next := &PNCounter{
-		replica:  c.replica,
-		positive: cloneMapU64(c.positive),
-		negative: newNeg,
-	}
-
-	delta := &PNCounter{
-		replica:  c.replica,
-		positive: make(map[ReplicaID]uint64),
-		negative: map[ReplicaID]uint64{c.replica: newNeg[c.replica]},
-	}
-	return next, &Delta{Type: TypePNCounter, State: delta}
+// SetNegative sets the negative count for a replica.
+func (c *PNCounter) SetNegative(replica ReplicaID, count uint64) {
+	c.negative[replica] = count
 }
 
-// Value returns the counter value as an int64: sum(positive) - sum(negative).
-func (c *PNCounter) Value() any {
-	return c.Int64()
+// GetPositive returns the positive count for a replica.
+func (c *PNCounter) GetPositive(replica ReplicaID) uint64 {
+	return c.positive[replica]
 }
 
-// Int64 returns the counter value as a typed int64.
+// GetNegative returns the negative count for a replica.
+func (c *PNCounter) GetNegative(replica ReplicaID) uint64 {
+	return c.negative[replica]
+}
+
+// Int64 returns the counter value: sum(positive) - sum(negative).
 func (c *PNCounter) Int64() int64 {
 	var pos, neg uint64
 	for _, v := range c.positive {
@@ -78,55 +49,20 @@ func (c *PNCounter) Int64() int64 {
 	return int64(pos) - int64(neg)
 }
 
-// VClock returns a combined vector clock. For each replica, the clock entry
-// is the sum of positive and negative counts, reflecting the total number of
-// operations from that replica.
-func (c *PNCounter) VClock() VClock {
-	vc := make(VClock)
+// RangePositive calls fn for each replica's positive count.
+func (c *PNCounter) RangePositive(fn func(replica ReplicaID, count uint64) bool) {
 	for r, v := range c.positive {
-		vc[r] += v
+		if !fn(r, v) {
+			return
+		}
 	}
+}
+
+// RangeNegative calls fn for each replica's negative count.
+func (c *PNCounter) RangeNegative(fn func(replica ReplicaID, count uint64) bool) {
 	for r, v := range c.negative {
-		vc[r] += v
-	}
-	return vc
-}
-
-// Merge merges a remote PNCounter state and returns the result. For each
-// replica, the maximum count is kept in both the positive and negative maps.
-// The receiver is not modified.
-func (c *PNCounter) Merge(other State) State {
-	o := other.(*PNCounter)
-	mergedPos := cloneMapU64(c.positive)
-	for r, v := range o.positive {
-		if v > mergedPos[r] {
-			mergedPos[r] = v
+		if !fn(r, v) {
+			return
 		}
 	}
-	mergedNeg := cloneMapU64(c.negative)
-	for r, v := range o.negative {
-		if v > mergedNeg[r] {
-			mergedNeg[r] = v
-		}
-	}
-	return &PNCounter{
-		replica:  c.replica,
-		positive: mergedPos,
-		negative: mergedNeg,
-	}
-}
-
-// CRDTType returns [TypePNCounter].
-func (c *PNCounter) CRDTType() TypeID {
-	return TypePNCounter
-}
-
-// MarshalBinary encodes the PNCounter into a binary format.
-func (c *PNCounter) MarshalBinary() ([]byte, error) {
-	return gobEncode(c.replica, c.positive, c.negative)
-}
-
-// UnmarshalBinary decodes a PNCounter from binary format.
-func (c *PNCounter) UnmarshalBinary(data []byte) error {
-	return gobDecode(data, &c.replica, &c.positive, &c.negative)
 }
