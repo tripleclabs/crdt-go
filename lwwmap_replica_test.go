@@ -1,14 +1,10 @@
-package replica
+package crdt
 
-import (
-	"testing"
-
-	"github.com/3clabs/crdt"
-)
+import "testing"
 
 func TestLWWMapReplica_Put(t *testing.T) {
-	r := NewLWWMap[string](1, crdt.StringCodec{})
-	delta, err := r.Put("name", "alice")
+	r := NewLWWMapReplica[string](1, StringCodec{})
+	delta, err := r.Data.Put("name", "alice", r.NextDot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,9 +18,9 @@ func TestLWWMapReplica_Put(t *testing.T) {
 }
 
 func TestLWWMapReplica_Remove(t *testing.T) {
-	r := NewLWWMap[string](1, crdt.StringCodec{})
-	r.Put("key", "val")
-	delta := r.Remove("key")
+	r := NewLWWMapReplica[string](1, StringCodec{})
+	r.Data.Put("key", "val", r.NextDot())
+	delta := r.Data.Remove("key", r.NextDot())
 	if len(delta) == 0 {
 		t.Fatal("expected non-empty delta")
 	}
@@ -35,10 +31,10 @@ func TestLWWMapReplica_Remove(t *testing.T) {
 }
 
 func TestLWWMapReplica_ApplyDelta_Put(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	b := NewLWWMap[string](2, crdt.StringCodec{})
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
 
-	delta, _ := a.Put("x", "from-a")
+	delta, _ := a.Data.Put("x", "from-a", a.NextDot())
 	b.ApplyDelta(delta)
 
 	v, _, ok := b.Data.Get("x")
@@ -48,15 +44,15 @@ func TestLWWMapReplica_ApplyDelta_Put(t *testing.T) {
 }
 
 func TestLWWMapReplica_ApplyDelta_HigherDotWins(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	a.Put("k", "a1")         // dot {1,1}
-	deltaA, _ := a.Put("k", "a2") // dot {1,2}
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	a.Data.Put("k", "a1", a.NextDot())                    // dot {1,1}
+	deltaA, _ := a.Data.Put("k", "a2", a.NextDot()) // dot {1,2}
 
-	b := NewLWWMap[string](2, crdt.StringCodec{})
-	deltaB, _ := b.Put("k", "b1") // dot {2,1}
+	b := NewLWWMapReplica[string](2, StringCodec{})
+	deltaB, _ := b.Data.Put("k", "b1", b.NextDot()) // dot {2,1}
 
 	// c applies both — a2 at {1,2} beats b1 at {2,1} (higher counter).
-	c := NewLWWMap[string](3, crdt.StringCodec{})
+	c := NewLWWMapReplica[string](3, StringCodec{})
 	c.ApplyDelta(deltaB)
 	c.ApplyDelta(deltaA)
 
@@ -67,10 +63,10 @@ func TestLWWMapReplica_ApplyDelta_HigherDotWins(t *testing.T) {
 }
 
 func TestLWWMapReplica_ApplyDelta_Idempotent(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	b := NewLWWMap[string](2, crdt.StringCodec{})
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
 
-	delta, _ := a.Put("k", "val")
+	delta, _ := a.Data.Put("k", "val", a.NextDot())
 	b.ApplyDelta(delta)
 	b.ApplyDelta(delta)
 
@@ -80,15 +76,15 @@ func TestLWWMapReplica_ApplyDelta_Idempotent(t *testing.T) {
 }
 
 func TestLWWMapReplica_ApplyDelta_Remove(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	a.Put("k", "val")          // dot {1,1}
-	removeDelta := a.Remove("k") // dot {1,2}
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	a.Data.Put("k", "val", a.NextDot())             // dot {1,1}
+	removeDelta := a.Data.Remove("k", a.NextDot()) // dot {1,2}
 
-	b := NewLWWMap[string](2, crdt.StringCodec{})
-	putDelta, _ := b.Put("k", "b-val") // dot {2,1}
+	b := NewLWWMapReplica[string](2, StringCodec{})
+	putDelta, _ := b.Data.Put("k", "b-val", b.NextDot()) // dot {2,1}
 
 	// c applies put then remove. Remove at {1,2} beats put at {2,1}.
-	c := NewLWWMap[string](3, crdt.StringCodec{})
+	c := NewLWWMapReplica[string](3, StringCodec{})
 	c.ApplyDelta(putDelta)
 	c.ApplyDelta(removeDelta)
 
@@ -99,37 +95,37 @@ func TestLWWMapReplica_ApplyDelta_Remove(t *testing.T) {
 }
 
 func TestLWWMapReplica_DeltasSince(t *testing.T) {
-	r := NewLWWMap[string](1, crdt.StringCodec{})
-	r.Put("a", "1")
-	r.Put("b", "2")
+	r := NewLWWMapReplica[string](1, StringCodec{})
+	r.Data.Put("a", "1", r.NextDot())
+	r.Data.Put("b", "2", r.NextDot())
 
-	deltas := r.DeltasSince(crdt.VClock{})
+	deltas := r.DeltasSince(VClock{})
 	if len(deltas) != 2 {
 		t.Fatalf("expected 2 deltas, got %d", len(deltas))
 	}
 
-	deltas = r.DeltasSince(crdt.VClock{1: 2})
+	deltas = r.DeltasSince(VClock{1: 2})
 	if len(deltas) != 0 {
 		t.Fatalf("expected 0 deltas, got %d", len(deltas))
 	}
 
-	deltas = r.DeltasSince(crdt.VClock{1: 1})
+	deltas = r.DeltasSince(VClock{1: 1})
 	if len(deltas) != 1 {
 		t.Fatalf("expected 1 delta, got %d", len(deltas))
 	}
 }
 
 func TestLWWMapReplica_Convergence(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	b := NewLWWMap[string](2, crdt.StringCodec{})
-	c := NewLWWMap[string](3, crdt.StringCodec{})
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
+	c := NewLWWMapReplica[string](3, StringCodec{})
 
-	da, _ := a.Put("x", "from-a")
-	db, _ := b.Put("y", "from-b")
-	dc, _ := c.Put("z", "from-c")
+	da, _ := a.Data.Put("x", "from-a", a.NextDot())
+	db, _ := b.Data.Put("y", "from-b", b.NextDot())
+	dc, _ := c.Data.Put("z", "from-c", c.NextDot())
 
 	allDeltas := [][]byte{da, db, dc}
-	for _, r := range []*LWWMapReplica[string]{a, b, c} {
+	for _, r := range []*Replica[*LWWMap[string]]{a, b, c} {
 		for _, d := range allDeltas {
 			r.ApplyDelta(d)
 		}
@@ -142,17 +138,17 @@ func TestLWWMapReplica_Convergence(t *testing.T) {
 }
 
 func TestLWWMapReplica_AntiEntropy(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	b := NewLWWMap[string](2, crdt.StringCodec{})
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
 
-	a.Put("x", "from-a")
-	a.Put("y", "from-a2")
-	b.Put("z", "from-b")
+	a.Data.Put("x", "from-a", a.NextDot())
+	a.Data.Put("y", "from-a2", a.NextDot())
+	b.Data.Put("z", "from-b", b.NextDot())
 
-	for _, d := range a.DeltasSince(b.Received.HWM()) {
+	for _, d := range a.DeltasSince(b.HWM()) {
 		b.ApplyDelta(d)
 	}
-	for _, d := range b.DeltasSince(a.Received.HWM()) {
+	for _, d := range b.DeltasSince(a.HWM()) {
 		a.ApplyDelta(d)
 	}
 
@@ -162,18 +158,18 @@ func TestLWWMapReplica_AntiEntropy(t *testing.T) {
 }
 
 func TestLWWMapReplica_ReceivedClock(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	a.Put("x", "1")
-	a.Put("y", "2")
-	a.Put("z", "3")
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	a.Data.Put("x", "1", a.NextDot())
+	a.Data.Put("y", "2", a.NextDot())
+	a.Data.Put("z", "3", a.NextDot())
 
 	if a.Received.Get(1) != 3 {
 		t.Fatalf("expected received hwm 3, got %d", a.Received.Get(1))
 	}
 
 	// b receives out of order.
-	b := NewLWWMap[string](2, crdt.StringCodec{})
-	deltas := a.DeltasSince(b.Received.HWM())
+	b := NewLWWMapReplica[string](2, StringCodec{})
+	deltas := a.DeltasSince(b.HWM())
 	for i := len(deltas) - 1; i >= 0; i-- {
 		b.ApplyDelta(deltas[i])
 	}
@@ -184,14 +180,14 @@ func TestLWWMapReplica_ReceivedClock(t *testing.T) {
 }
 
 func TestLWWMapReplica_LocalClock_NotAdvancedByDelta(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	b := NewLWWMap[string](2, crdt.StringCodec{})
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
 
-	delta, _ := a.Put("x", "val")
+	delta, _ := a.Data.Put("x", "val", a.NextDot())
 	b.ApplyDelta(delta)
 
-	if b.Clock.Counter() != 0 {
-		t.Fatalf("local clock should not advance from delta, got %d", b.Clock.Counter())
+	if b.Local.Counter() != 0 {
+		t.Fatalf("local clock should not advance from delta, got %d", b.Local.Counter())
 	}
 	if b.Received.Get(1) != 1 {
 		t.Fatalf("received should track it, got %d", b.Received.Get(1))
@@ -199,12 +195,12 @@ func TestLWWMapReplica_LocalClock_NotAdvancedByDelta(t *testing.T) {
 }
 
 func TestLWWMapReplica_GapFill(t *testing.T) {
-	a := NewLWWMap[string](1, crdt.StringCodec{})
-	d1, _ := a.Put("a", "1")
-	_, _ = a.Put("b", "2") // d2 is "lost"
-	d3, _ := a.Put("c", "3")
+	a := NewLWWMapReplica[string](1, StringCodec{})
+	d1, _ := a.Data.Put("a", "1", a.NextDot())
+	a.Data.Put("b", "2", a.NextDot()) // d2 is "lost"
+	d3, _ := a.Data.Put("c", "3", a.NextDot())
 
-	b := NewLWWMap[string](2, crdt.StringCodec{})
+	b := NewLWWMapReplica[string](2, StringCodec{})
 	b.ApplyDelta(d1)
 	b.ApplyDelta(d3)
 
@@ -214,7 +210,7 @@ func TestLWWMapReplica_GapFill(t *testing.T) {
 	}
 
 	// Anti-entropy fills the gap.
-	for _, d := range a.DeltasSince(b.Received.HWM()) {
+	for _, d := range a.DeltasSince(b.HWM()) {
 		b.ApplyDelta(d)
 	}
 
@@ -227,18 +223,19 @@ func TestLWWMapReplica_GapFill(t *testing.T) {
 }
 
 func TestLWWMapReplica_FiveNodes(t *testing.T) {
-	replicas := make([]*LWWMapReplica[string], 5)
+	replicas := make([]*Replica[*LWWMap[string]], 5)
 	for i := range replicas {
-		replicas[i] = NewLWWMap[string](crdt.ReplicaID(i+1), crdt.StringCodec{})
+		replicas[i] = NewLWWMapReplica[string](ReplicaID(i+1), StringCodec{})
 	}
 
 	// Each node does 3 ops.
 	var allDeltas [][]byte
-	for i, r := range replicas {
+	for _, r := range replicas {
 		for j := 0; j < 3; j++ {
-			d, _ := r.Put(
-				string(rune('a'+i*3+j)),
-				string(rune('A'+i*3+j)),
+			d, _ := r.Data.Put(
+				string(rune('a'+int(r.Local.Replica())*3+j)),
+				string(rune('A'+int(r.Local.Replica())*3+j)),
+				r.NextDot(),
 			)
 			allDeltas = append(allDeltas, d)
 		}
@@ -261,9 +258,9 @@ func TestLWWMapReplica_FiveNodes(t *testing.T) {
 	// All received clocks should have hwm 3 for each replica.
 	for i, r := range replicas {
 		for j := 1; j <= 5; j++ {
-			if r.Received.Get(crdt.ReplicaID(j)) != 3 {
+			if r.Received.Get(ReplicaID(j)) != 3 {
 				t.Fatalf("replica %d: expected received[%d]=3, got %d",
-					i+1, j, r.Received.Get(crdt.ReplicaID(j)))
+					i+1, j, r.Received.Get(ReplicaID(j)))
 			}
 		}
 	}

@@ -201,7 +201,7 @@ func TestORSet_PutContains(t *testing.T) {
 func TestORSet_Remove(t *testing.T) {
 	s := NewORSet(StringCodec{})
 	s.Put("alice", DotMap{1: 1})
-	s.Remove("alice")
+	s.Remove("alice", VClock{})
 	if s.Contains("alice") {
 		t.Fatal("should be removed")
 	}
@@ -241,7 +241,7 @@ func TestORSet_Range(t *testing.T) {
 
 func TestORMap_PutGet(t *testing.T) {
 	m := NewORMap(StringCodec{})
-	m.Put("k", "val", DotMap{1: 1})
+	m.Put("k", "val", Dot{1, 1})
 	v, dm, ok := m.Get("k")
 	if !ok || v != "val" || dm[1] != 1 {
 		t.Fatalf("got %v %v %v", v, dm, ok)
@@ -250,8 +250,8 @@ func TestORMap_PutGet(t *testing.T) {
 
 func TestORMap_Remove(t *testing.T) {
 	m := NewORMap(StringCodec{})
-	m.Put("k", "val", DotMap{1: 1})
-	m.Remove("k")
+	m.Put("k", "val", Dot{1, 1})
+	m.Remove("k", VClock{1: 1})
 	_, _, ok := m.Get("k")
 	if ok {
 		t.Fatal("should be removed")
@@ -260,8 +260,8 @@ func TestORMap_Remove(t *testing.T) {
 
 func TestORMap_Range(t *testing.T) {
 	m := NewORMap(StringCodec{})
-	m.Put("a", "1", DotMap{1: 1})
-	m.Put("b", "2", DotMap{1: 2})
+	m.Put("a", "1", Dot{1, 1})
+	m.Put("b", "2", Dot{1, 2})
 	count := 0
 	m.Range(func(_ string, _ string, _ DotMap) bool { count++; return true })
 	if count != 2 {

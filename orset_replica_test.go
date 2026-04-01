@@ -1,15 +1,13 @@
-package replica
+package crdt
 
 import (
 	"sort"
 	"testing"
-
-	"github.com/3clabs/crdt"
 )
 
 func TestORSetReplica_Add(t *testing.T) {
-	r := NewORSet[string](1, crdt.StringCodec{})
-	delta, err := r.Add("alice")
+	r := NewORSetReplica[string](1, StringCodec{})
+	delta, err := r.Data.Add("alice", r.NextDot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,10 +20,10 @@ func TestORSetReplica_Add(t *testing.T) {
 }
 
 func TestORSetReplica_Remove(t *testing.T) {
-	r := NewORSet[string](1, crdt.StringCodec{})
-	r.Add("alice")
-	r.Add("bob")
-	r.Remove("alice")
+	r := NewORSetReplica[string](1, StringCodec{})
+	r.Data.Add("alice", r.NextDot())
+	r.Data.Add("bob", r.NextDot())
+	r.Data.Remove("alice", r.HWM())
 	if r.Data.Contains("alice") {
 		t.Fatal("alice should be removed")
 	}
@@ -35,10 +33,10 @@ func TestORSetReplica_Remove(t *testing.T) {
 }
 
 func TestORSetReplica_ApplyDelta_Add(t *testing.T) {
-	a := NewORSet[string](1, crdt.StringCodec{})
-	b := NewORSet[string](2, crdt.StringCodec{})
+	a := NewORSetReplica[string](1, StringCodec{})
+	b := NewORSetReplica[string](2, StringCodec{})
 
-	d, _ := a.Add("x")
+	d, _ := a.Data.Add("x", a.NextDot())
 	b.ApplyDelta(d)
 	if !b.Data.Contains("x") {
 		t.Fatal("b should contain x")
@@ -48,15 +46,15 @@ func TestORSetReplica_ApplyDelta_Add(t *testing.T) {
 func TestORSetReplica_ApplyDelta_AddWins(t *testing.T) {
 	// a adds "x". b adds "x" then removes. a's add should survive
 	// because its dot is not covered by b's remove context.
-	a := NewORSet[string](1, crdt.StringCodec{})
-	addA, _ := a.Add("x")
+	a := NewORSetReplica[string](1, StringCodec{})
+	addA, _ := a.Data.Add("x", a.NextDot())
 
-	b := NewORSet[string](2, crdt.StringCodec{})
-	b.Add("x")
-	removeB, _ := b.Remove("x")
+	b := NewORSetReplica[string](2, StringCodec{})
+	b.Data.Add("x", b.NextDot())
+	removeB, _ := b.Data.Remove("x", b.HWM())
 
 	// c applies remove first, then add.
-	c := NewORSet[string](3, crdt.StringCodec{})
+	c := NewORSetReplica[string](3, StringCodec{})
 	c.ApplyDelta(removeB)
 	c.ApplyDelta(addA)
 	if !c.Data.Contains("x") {
@@ -66,12 +64,12 @@ func TestORSetReplica_ApplyDelta_AddWins(t *testing.T) {
 
 func TestORSetReplica_ApplyDelta_ObservedRemove(t *testing.T) {
 	// a adds "x", sends to b. b removes "x" (has seen a's dot).
-	a := NewORSet[string](1, crdt.StringCodec{})
-	addA, _ := a.Add("x")
+	a := NewORSetReplica[string](1, StringCodec{})
+	addA, _ := a.Data.Add("x", a.NextDot())
 
-	b := NewORSet[string](2, crdt.StringCodec{})
+	b := NewORSetReplica[string](2, StringCodec{})
 	b.ApplyDelta(addA) // b now has a's dot in received
-	removeB, _ := b.Remove("x")
+	removeB, _ := b.Data.Remove("x", b.HWM())
 
 	// a applies b's remove. Since b's context covers a's dot, x is gone.
 	a.ApplyDelta(removeB)
@@ -81,11 +79,11 @@ func TestORSetReplica_ApplyDelta_ObservedRemove(t *testing.T) {
 }
 
 func TestORSetReplica_Convergence(t *testing.T) {
-	a := NewORSet[string](1, crdt.StringCodec{})
-	b := NewORSet[string](2, crdt.StringCodec{})
+	a := NewORSetReplica[string](1, StringCodec{})
+	b := NewORSetReplica[string](2, StringCodec{})
 
-	da, _ := a.Add("from-a")
-	db, _ := b.Add("from-b")
+	da, _ := a.Data.Add("from-a", a.NextDot())
+	db, _ := b.Data.Add("from-b", b.NextDot())
 
 	a.ApplyDelta(db)
 	b.ApplyDelta(da)
@@ -104,12 +102,12 @@ func TestORSetReplica_Convergence(t *testing.T) {
 }
 
 func TestORSetReplica_AntiEntropy(t *testing.T) {
-	a := NewORSet[string](1, crdt.StringCodec{})
-	b := NewORSet[string](2, crdt.StringCodec{})
+	a := NewORSetReplica[string](1, StringCodec{})
+	b := NewORSetReplica[string](2, StringCodec{})
 
-	a.Add("x")
-	a.Add("y")
-	b.Add("z")
+	a.Data.Add("x", a.NextDot())
+	a.Data.Add("y", a.NextDot())
+	b.Data.Add("z", b.NextDot())
 
 	for _, d := range a.DeltasSince(b.Received.HWM()) {
 		b.ApplyDelta(d)
@@ -124,9 +122,9 @@ func TestORSetReplica_AntiEntropy(t *testing.T) {
 }
 
 func TestORSetReplica_Idempotent(t *testing.T) {
-	a := NewORSet[string](1, crdt.StringCodec{})
-	b := NewORSet[string](2, crdt.StringCodec{})
-	d, _ := a.Add("x")
+	a := NewORSetReplica[string](1, StringCodec{})
+	b := NewORSetReplica[string](2, StringCodec{})
+	d, _ := a.Data.Add("x", a.NextDot())
 	b.ApplyDelta(d)
 	b.ApplyDelta(d)
 	if b.Data.Len() != 1 {

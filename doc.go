@@ -1,21 +1,38 @@
-// Package crdt provides pure-Go CRDT data types and causality primitives.
+// Package crdt provides pure-Go CRDT data types with pluggable storage and
+// clock semantics.
 //
-// CRDT types in this package are pure typed storage — they read and write
-// a [Backend] with dot/dotmap metadata but contain no merge logic, no
-// clocks, and no delta encoding. The merge semantics and clock management
-// live in the replica layer (see the replica sub-package).
+// Each CRDT is composed of three orthogonal axes:
+//
+//   - Storage semantics: the data type ([LWWMap], [ORSet], etc.) backed by a
+//     pluggable [Backend] (in-memory or disk-backed via bbolt)
+//   - Clock semantics: the domination rule ([LWWClock], [AddWinsClock],
+//     [MaxWinsClock], [AlwaysMergeClock])
+//   - Merge semantics: how winning deltas are applied to storage
+//     ([Mergeable.Apply])
+//
+// A single generic [Replica] wraps any [Mergeable] type with clocks and
+// provides the replication surface: [Replica.ApplyDelta] for incoming deltas,
+// [Replica.DeltasSince] for anti-entropy, and [Replica.NextDot] for local
+// mutations.
 //
 // # CRDT Types
 //
-//   - [GCounter]: Grow-only counter (replica → count)
-//   - [PNCounter]: Positive-negative counter
-//   - [LWWRegister]: Last-write-wins register (single value + dot)
-//   - [MVRegister]: Multi-value register (concurrent values + dots)
 //   - [LWWMap]: Last-write-wins map (key → value + dot, with tombstones)
 //   - [ORSet]: Observed-remove set (element → dotmap)
 //   - [ORMap]: Observed-remove map (key → value + dotmap)
 //   - [AWLWWMap]: Add-wins LWW map (tombstones carry causal context)
 //   - [GList]: Grow-only list (append-only, causal ordering)
+//   - [GCounter]: Grow-only counter (replica → count)
+//   - [PNCounter]: Positive-negative counter
+//   - [LWWRegister]: Last-write-wins register (single value + dot)
+//   - [MVRegister]: Multi-value register (concurrent values + dots)
+//
+// # Clock Strategies
+//
+//   - [LWWClock]: Higher dot wins ([DotGT])
+//   - [AddWinsClock]: Concurrent add beats concurrent remove
+//   - [MaxWinsClock]: Higher count wins
+//   - [AlwaysMergeClock]: Always apply (merge logic in [Mergeable.Apply])
 //
 // # Causality Primitives
 //

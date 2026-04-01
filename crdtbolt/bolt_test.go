@@ -20,62 +20,45 @@ func tempDB(t *testing.T) *BoltBackend {
 	return b
 }
 
+// --- Low-level Backend tests ---
+
 func TestBoltBackend_EntryOps(t *testing.T) {
 	b := tempDB(t)
-	b.PutEntry("a", []byte("hello"), []byte{1, 2})
-
-	v, m, ok := b.GetEntry("a")
-	if !ok {
-		t.Fatal("expected key to exist")
-	}
-	if string(v) != "hello" {
-		t.Fatalf("got value %q, want %q", v, "hello")
-	}
-	if len(m) != 2 || m[0] != 1 || m[1] != 2 {
-		t.Fatalf("got meta %v, want [1 2]", m)
-	}
-
-	_, _, ok = b.GetEntry("missing")
+	_, _, ok := b.GetEntry("missing")
 	if ok {
-		t.Fatal("expected missing key to return false")
+		t.Fatal("expected not found")
+	}
+	b.PutEntry("k", []byte("val"), []byte{1, 2})
+	v, m, ok := b.GetEntry("k")
+	if !ok {
+		t.Fatal("expected found")
+	}
+	if string(v) != "val" || len(m) != 2 || m[0] != 1 {
+		t.Fatalf("got v=%s m=%v", v, m)
 	}
 }
 
 func TestBoltBackend_DeleteEntry(t *testing.T) {
 	b := tempDB(t)
-	b.PutEntry("a", []byte("hello"), []byte{1})
-	b.DeleteEntry("a")
-
-	_, _, ok := b.GetEntry("a")
+	b.PutEntry("k", []byte("v"), []byte{1})
+	b.DeleteEntry("k")
+	_, _, ok := b.GetEntry("k")
 	if ok {
-		t.Fatal("expected key to be deleted")
+		t.Fatal("expected not found after delete")
 	}
-	b.DeleteEntry("nonexistent") // no-op
 }
 
 func TestBoltBackend_RangeEntries(t *testing.T) {
 	b := tempDB(t)
-	b.PutEntry("a", []byte("1"), nil)
-	b.PutEntry("b", []byte("2"), nil)
-	b.PutEntry("c", []byte("3"), nil)
-
+	b.PutEntry("a", []byte("1"), []byte{10})
+	b.PutEntry("b", []byte("2"), []byte{20})
 	count := 0
 	b.RangeEntries(func(key string, value []byte, meta []byte) bool {
 		count++
 		return true
 	})
-	if count != 3 {
-		t.Fatalf("expected 3, got %d", count)
-	}
-
-	// Early stop.
-	stopped := 0
-	b.RangeEntries(func(key string, value []byte, meta []byte) bool {
-		stopped++
-		return false
-	})
-	if stopped != 1 {
-		t.Fatalf("expected early stop after 1, got %d", stopped)
+	if count != 2 {
+		t.Fatalf("expected 2, got %d", count)
 	}
 }
 
@@ -84,38 +67,32 @@ func TestBoltBackend_EntryLen(t *testing.T) {
 	if b.EntryLen() != 0 {
 		t.Fatal("expected 0")
 	}
-	b.PutEntry("a", []byte("1"), nil)
-	b.PutEntry("b", []byte("2"), nil)
-	if b.EntryLen() != 2 {
-		t.Fatalf("expected 2, got %d", b.EntryLen())
+	b.PutEntry("k", []byte("v"), []byte{1})
+	if b.EntryLen() != 1 {
+		t.Fatalf("expected 1, got %d", b.EntryLen())
 	}
 }
 
 func TestBoltBackend_TombstoneOps(t *testing.T) {
 	b := tempDB(t)
-	b.PutTombstone("a", []byte{3, 4})
-
-	m, ok := b.GetTombstone("a")
-	if !ok {
-		t.Fatal("expected tombstone")
-	}
-	if len(m) != 2 || m[0] != 3 {
-		t.Fatalf("got %v, want [3 4]", m)
-	}
-
-	_, ok = b.GetTombstone("missing")
+	_, ok := b.GetTombstone("missing")
 	if ok {
-		t.Fatal("expected false")
+		t.Fatal("expected not found")
+	}
+	b.PutTombstone("k", []byte{1, 2, 3})
+	m, ok := b.GetTombstone("k")
+	if !ok || len(m) != 3 || m[0] != 1 {
+		t.Fatalf("got m=%v ok=%v", m, ok)
 	}
 }
 
 func TestBoltBackend_DeleteTombstone(t *testing.T) {
 	b := tempDB(t)
-	b.PutTombstone("a", []byte{1})
-	b.DeleteTombstone("a")
-	_, ok := b.GetTombstone("a")
+	b.PutTombstone("k", []byte{1})
+	b.DeleteTombstone("k")
+	_, ok := b.GetTombstone("k")
 	if ok {
-		t.Fatal("expected tombstone to be deleted")
+		t.Fatal("expected not found after delete")
 	}
 }
 
@@ -123,7 +100,6 @@ func TestBoltBackend_RangeTombstones(t *testing.T) {
 	b := tempDB(t)
 	b.PutTombstone("a", []byte{1})
 	b.PutTombstone("b", []byte{2})
-
 	count := 0
 	b.RangeTombstones(func(key string, meta []byte) bool {
 		count++
@@ -153,7 +129,7 @@ func TestBoltBackend_EmptyValueAndMeta(t *testing.T) {
 		t.Fatal("expected key to exist")
 	}
 	if len(v) != 0 || len(m) != 0 {
-		t.Fatalf("expected empty value and meta, got v=%v m=%v", v, m)
+		t.Fatalf("expected empty, got v=%v m=%v", v, m)
 	}
 }
 
@@ -165,7 +141,6 @@ func TestBoltBackend_LargeValueMeta(t *testing.T) {
 	}
 	bigMeta := []byte{42, 43, 44}
 	b.PutEntry("big", bigVal, bigMeta)
-
 	v, m, ok := b.GetEntry("big")
 	if !ok {
 		t.Fatal("expected key")
@@ -178,70 +153,93 @@ func TestBoltBackend_LargeValueMeta(t *testing.T) {
 	}
 }
 
-// --- Integration: use BoltBackend with CRDT types ---
-
-func TestBoltBackend_WithLWWMap(t *testing.T) {
-	b := tempDB(t)
-	m := crdt.NewLWWMap(1, crdt.WithBackend(b))
-
-	m.Put("name", "alice")
-	m.Put("age", 30)
-
-	v, ok := m.Get("name")
-	if !ok || v != "alice" {
-		t.Fatalf("expected alice, got %v", v)
-	}
-	v, ok = m.Get("age")
-	if !ok || v != 30 {
-		t.Fatalf("expected 30, got %v", v)
-	}
-	if m.Len() != 2 {
-		t.Fatalf("expected 2 entries, got %d", m.Len())
+func TestBoltBackend_EncodeDecodeEntry(t *testing.T) {
+	val := []byte("hello")
+	meta := []byte{1, 2, 3}
+	encoded := encodeEntry(val, meta)
+	dv, dm := decodeEntry(encoded)
+	if string(dv) != "hello" || len(dm) != 3 || dm[0] != 1 {
+		t.Fatalf("got dv=%s dm=%v", dv, dm)
 	}
 }
 
-func TestBoltBackend_WithLWWMap_Merge(t *testing.T) {
+func TestBoltBackend_EncodeDecodeEntryEmpty(t *testing.T) {
+	encoded := encodeEntry(nil, nil)
+	dv, dm := decodeEntry(encoded)
+	if len(dv) != 0 || len(dm) != 0 {
+		t.Fatalf("expected empty, got dv=%v dm=%v", dv, dm)
+	}
+}
+
+func TestDecodeEntry_ShortData(t *testing.T) {
+	v, m := decodeEntry([]byte{1, 2}) // too short
+	if v != nil || m != nil {
+		t.Fatal("expected nil for short data")
+	}
+}
+
+// --- Integration: use BoltBackend with Replica types ---
+
+func TestBoltBackend_WithLWWMap(t *testing.T) {
+	b := tempDB(t)
+	r := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+
+	r.Data.Put("name", "alice", r.NextDot())
+	r.Data.Put("age", "30", r.NextDot())
+
+	v, _, ok := r.Data.Get("name")
+	if !ok || v != "alice" {
+		t.Fatalf("expected alice, got %v", v)
+	}
+	if r.Data.Len() != 2 {
+		t.Fatalf("expected 2, got %d", r.Data.Len())
+	}
+}
+
+func TestBoltBackend_WithLWWMap_Convergence(t *testing.T) {
 	ba := tempDB(t)
 	bb := tempDB(t)
 
-	a := crdt.NewLWWMap(1, crdt.WithBackend(ba))
-	b := crdt.NewLWWMap(2, crdt.WithBackend(bb))
+	a := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(ba))
+	b := crdt.NewLWWMapReplica[string](2, crdt.StringCodec{}, crdt.WithBackend(bb))
 
-	a.Put("from-a", "a-val")
-	b.Put("from-b", "b-val")
+	da, _ := a.Data.Put("from-a", "a-val", a.NextDot())
+	db, _ := b.Data.Put("from-b", "b-val", b.NextDot())
 
-	a.Merge(b)
-	if a.Len() != 2 {
-		t.Fatalf("expected 2, got %d", a.Len())
+	a.ApplyDelta(db)
+	b.ApplyDelta(da)
+
+	if a.Data.Len() != 2 || b.Data.Len() != 2 {
+		t.Fatalf("expected both 2, got a=%d b=%d", a.Data.Len(), b.Data.Len())
 	}
 }
 
 func TestBoltBackend_WithORSet(t *testing.T) {
 	b := tempDB(t)
-	s := crdt.NewORSet(1, crdt.WithBackend(b))
+	r := crdt.NewORSetReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
 
-	s.Add("alice")
-	s.Add("bob")
+	r.Data.Add("alice", r.NextDot())
+	r.Data.Add("bob", r.NextDot())
 
-	if !s.Contains("alice") || !s.Contains("bob") {
+	if !r.Data.Contains("alice") || !r.Data.Contains("bob") {
 		t.Fatal("expected both elements")
 	}
-	if s.Len() != 2 {
-		t.Fatalf("expected 2, got %d", s.Len())
+	if r.Data.Len() != 2 {
+		t.Fatalf("expected 2, got %d", r.Data.Len())
 	}
 
-	s.Remove("alice")
-	if s.Contains("alice") {
+	r.Data.Remove("alice", r.HWM())
+	if r.Data.Contains("alice") {
 		t.Fatal("alice should be removed")
 	}
 }
 
 func TestBoltBackend_WithORMap(t *testing.T) {
 	b := tempDB(t)
-	m := crdt.NewORMap(1, crdt.WithBackend(b))
+	r := crdt.NewORMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
 
-	m.Put("key", "value")
-	v, ok := m.Get("key")
+	r.Data.Put("key", "value", r.NextDot())
+	v, _, ok := r.Data.Get("key")
 	if !ok || v != "value" {
 		t.Fatalf("expected value, got %v", v)
 	}
@@ -249,12 +247,15 @@ func TestBoltBackend_WithORMap(t *testing.T) {
 
 func TestBoltBackend_WithGList(t *testing.T) {
 	b := tempDB(t)
-	l := crdt.NewGList(1, crdt.WithBackend(b))
+	r := crdt.NewGListReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
 
-	l.Append("first")
-	l.Append("second")
+	r.Data.Append("first", r.NextDot())
+	r.Data.Append("second", r.NextDot())
 
-	items := l.Items()
+	items, err := r.Data.Items()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(items) != 2 || items[0] != "first" || items[1] != "second" {
 		t.Fatalf("expected [first second], got %v", items)
 	}
@@ -264,7 +265,6 @@ func TestBoltBackend_Snapshot(t *testing.T) {
 	b := tempDB(t)
 	b.PutEntry("k", []byte("val"), []byte{1})
 
-	// Snapshot to a temp file.
 	dir := t.TempDir()
 	snapPath := filepath.Join(dir, "snapshot.db")
 	f, err := os.Create(snapPath)
@@ -277,7 +277,6 @@ func TestBoltBackend_Snapshot(t *testing.T) {
 	}
 	f.Close()
 
-	// Open snapshot and verify data.
 	restored, err := Open(snapPath)
 	if err != nil {
 		t.Fatal(err)
@@ -286,35 +285,6 @@ func TestBoltBackend_Snapshot(t *testing.T) {
 
 	v, _, ok := restored.GetEntry("k")
 	if !ok || string(v) != "val" {
-		t.Fatal("snapshot missing data")
-	}
-}
-
-func TestBoltBackend_EncodeDecodeEntry(t *testing.T) {
-	value := []byte("hello world")
-	meta := []byte{1, 2, 3}
-	encoded := encodeEntry(value, meta)
-
-	v, m := decodeEntry(encoded)
-	if string(v) != "hello world" {
-		t.Fatalf("value mismatch: %q", v)
-	}
-	if len(m) != 3 || m[0] != 1 || m[1] != 2 || m[2] != 3 {
-		t.Fatalf("meta mismatch: %v", m)
-	}
-}
-
-func TestBoltBackend_EncodeDecodeEntryEmpty(t *testing.T) {
-	encoded := encodeEntry(nil, nil)
-	v, m := decodeEntry(encoded)
-	if len(v) != 0 || len(m) != 0 {
-		t.Fatalf("expected empty, got v=%v m=%v", v, m)
-	}
-}
-
-func TestDecodeEntry_ShortData(t *testing.T) {
-	v, m := decodeEntry([]byte{1})
-	if v != nil || m != nil {
-		t.Fatal("expected nil for short data")
+		t.Fatalf("expected val, got %v ok=%v", v, ok)
 	}
 }

@@ -12,6 +12,12 @@ import (
 // Dot: 16 bytes (8 replica + 8 counter)
 // DotMap/VClock: 4-byte count + 16 bytes per entry
 
+// Op codes for delta wire format.
+const (
+	OpPut    byte = 0x01
+	OpRemove byte = 0x02
+)
+
 var (
 	// ErrShortBuffer indicates the byte slice is too short for the expected data.
 	ErrShortBuffer = errors.New("crdt: short buffer")
