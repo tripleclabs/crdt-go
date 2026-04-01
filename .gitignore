@@ -1,0 +1,7 @@
+.claude/
+
+# rapid property test failure reproduction files
+testdata/rapid/
+
+# test coverage output
+cover.out
