@@ -12,6 +12,7 @@ type ORSet[E any] struct {
 
 // NewORSet returns an initialized ORSet.
 func NewORSet[E any](codec Codec[E], opts ...Option) *ORSet[E] {
+	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
@@ -111,7 +112,10 @@ func (s *ORSet[E]) Get(elem E) (DotMap, bool) {
 	if !ok {
 		return nil, false
 	}
-	dm, _ := DecodeDotMap(metaBytes)
+	dm, err := DecodeDotMap(metaBytes)
+	if err != nil {
+		return nil, false
+	}
 	return dm, true
 }
 
@@ -121,7 +125,10 @@ func (s *ORSet[E]) GetEncoded(elemKey string) (DotMap, bool) {
 	if !ok {
 		return nil, false
 	}
-	dm, _ := DecodeDotMap(metaBytes)
+	dm, err := DecodeDotMap(metaBytes)
+	if err != nil {
+		return nil, false
+	}
 	return dm, true
 }
 
@@ -154,7 +161,10 @@ func (s *ORSet[E]) Elements() ([]E, error) {
 // Range calls fn for each (encoded element key, dotmap) pair.
 func (s *ORSet[E]) Range(fn func(elemKey string, dots DotMap) bool) {
 	s.backend.RangeEntries(func(key string, _ []byte, metaBytes []byte) bool {
-		dm, _ := DecodeDotMap(metaBytes)
+		dm, err := DecodeDotMap(metaBytes)
+		if err != nil {
+			return true // skip corrupt entry
+		}
 		return fn(key, dm)
 	})
 }

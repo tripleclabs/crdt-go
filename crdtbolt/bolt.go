@@ -85,15 +85,23 @@ func decodeEntry(data []byte) (value, meta []byte) {
 	return data[4 : 4+vlen], data[4+vlen:]
 }
 
-// GetEntry retrieves the value and metadata for key.
+// GetEntry retrieves the value and metadata for key. The returned slices
+// are copies safe to use after the call returns.
 func (b *BoltBackend) GetEntry(key string) (value []byte, meta []byte, ok bool) {
 	b.db.View(func(tx *bolt.Tx) error {
 		bkt := tx.Bucket(bucketEntries)
 		data := bkt.Get([]byte(key))
-		if data != nil {
-			value, meta = decodeEntry(data)
-			ok = true
+		if data == nil {
+			return nil
 		}
+		v, m := decodeEntry(data)
+		// Copy both slices — they point into mmap'd memory that is
+		// only valid for the duration of this transaction.
+		value = make([]byte, len(v))
+		copy(value, v)
+		meta = make([]byte, len(m))
+		copy(meta, m)
+		ok = true
 		return nil
 	})
 	return
@@ -114,11 +122,16 @@ func (b *BoltBackend) DeleteEntry(key string) {
 }
 
 // RangeEntries calls fn for each entry. If fn returns false, iteration stops.
+// The key, value, and meta slices passed to fn are copies safe to retain.
 func (b *BoltBackend) RangeEntries(fn func(key string, value []byte, meta []byte) bool) {
 	b.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketEntries).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			val, met := decodeEntry(v)
+			rawVal, rawMet := decodeEntry(v)
+			val := make([]byte, len(rawVal))
+			copy(val, rawVal)
+			met := make([]byte, len(rawMet))
+			copy(met, rawMet)
 			if !fn(string(k), val, met) {
 				break
 			}
@@ -166,11 +179,14 @@ func (b *BoltBackend) DeleteTombstone(key string) {
 }
 
 // RangeTombstones calls fn for each tombstone. If fn returns false, iteration stops.
+// The meta slice passed to fn is a copy safe to retain.
 func (b *BoltBackend) RangeTombstones(fn func(key string, meta []byte) bool) {
 	b.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketTombstones).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if !fn(string(k), v) {
+			m := make([]byte, len(v))
+			copy(m, v)
+			if !fn(string(k), m) {
 				break
 			}
 		}

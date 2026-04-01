@@ -17,6 +17,7 @@ type mvEntry struct {
 
 // NewMVRegister returns an initialized MVRegister.
 func NewMVRegister[V any](codec Codec[V]) *MVRegister[V] {
+	requireCodec(codec)
 	return &MVRegister[V]{codec: codec}
 }
 
@@ -117,7 +118,10 @@ func (r *MVRegister[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
 	if off+16 > len(delta) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(delta[off:])
+	dot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	return DeltaInfo{
 		Key:  "",
 		Meta: delta[off : off+16],
@@ -136,7 +140,10 @@ func (r *MVRegister[V]) Apply(delta []byte) error {
 	if off+16 > len(delta) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(delta[off:])
+	remoteDot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return err
+	}
 	off += 16
 
 	remoteCtx, err := DecodeVClock(delta[off:])

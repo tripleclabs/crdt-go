@@ -15,15 +15,15 @@ func (LWWClock) Allows(local Queryable, info DeltaInfo) bool {
 	}
 
 	if entryMeta, ok := local.EntryMeta(info.Key); ok {
-		localDot, _ := DecodeDot(entryMeta)
-		if !DotGT(remoteDot, localDot) {
+		localDot, err := DecodeDot(entryMeta)
+		if err == nil && !DotGT(remoteDot, localDot) {
 			return false
 		}
 	}
 
 	if tombMeta, ok := local.TombstoneMeta(info.Key); ok {
-		localDot, _ := DecodeDot(tombMeta)
-		if !DotGT(remoteDot, localDot) {
+		localDot, err := DecodeDot(tombMeta)
+		if err == nil && !DotGT(remoteDot, localDot) {
 			return false
 		}
 	}

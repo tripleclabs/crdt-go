@@ -11,6 +11,7 @@ type ORMap[V any] struct {
 
 // NewORMap returns an initialized ORMap.
 func NewORMap[V any](codec Codec[V], opts ...Option) *ORMap[V] {
+	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
@@ -88,7 +89,10 @@ func (m *ORMap[V]) Get(key string) (V, DotMap, bool) {
 	if err != nil {
 		return zero, nil, false
 	}
-	dm, _ := DecodeDotMap(metaBytes)
+	dm, err := DecodeDotMap(metaBytes)
+	if err != nil {
+		return zero, nil, false
+	}
 	return v, dm, true
 }
 
@@ -98,7 +102,10 @@ func (m *ORMap[V]) GetBytes(key string) ([]byte, DotMap, bool) {
 	if !ok {
 		return nil, nil, false
 	}
-	dm, _ := DecodeDotMap(metaBytes)
+	dm, err := DecodeDotMap(metaBytes)
+	if err != nil {
+		return nil, nil, false
+	}
 	return valBytes, dm, true
 }
 
@@ -109,7 +116,10 @@ func (m *ORMap[V]) Range(fn func(key string, value V, dots DotMap) bool) {
 		if err != nil {
 			return true
 		}
-		dm, _ := DecodeDotMap(metaBytes)
+		dm, err := DecodeDotMap(metaBytes)
+		if err != nil {
+			return true // skip corrupt entry
+		}
 		return fn(key, v, dm)
 	})
 }
@@ -117,7 +127,10 @@ func (m *ORMap[V]) Range(fn func(key string, value V, dots DotMap) bool) {
 // RangeBytes calls fn for each entry with raw value bytes.
 func (m *ORMap[V]) RangeBytes(fn func(key string, valBytes []byte, dots DotMap) bool) {
 	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
-		dm, _ := DecodeDotMap(metaBytes)
+		dm, err := DecodeDotMap(metaBytes)
+		if err != nil {
+			return true // skip corrupt entry
+		}
 		return fn(key, valBytes, dm)
 	})
 }

@@ -45,7 +45,7 @@ func TestLWWMapReplica_ApplyDelta_Put(t *testing.T) {
 
 func TestLWWMapReplica_ApplyDelta_HigherDotWins(t *testing.T) {
 	a := NewLWWMapReplica[string](1, StringCodec{})
-	a.Data.Put("k", "a1", a.NextDot())                    // dot {1,1}
+	a.Data.Put("k", "a1", a.NextDot())              // dot {1,1}
 	deltaA, _ := a.Data.Put("k", "a2", a.NextDot()) // dot {1,2}
 
 	b := NewLWWMapReplica[string](2, StringCodec{})
@@ -77,7 +77,7 @@ func TestLWWMapReplica_ApplyDelta_Idempotent(t *testing.T) {
 
 func TestLWWMapReplica_ApplyDelta_Remove(t *testing.T) {
 	a := NewLWWMapReplica[string](1, StringCodec{})
-	a.Data.Put("k", "val", a.NextDot())             // dot {1,1}
+	a.Data.Put("k", "val", a.NextDot())            // dot {1,1}
 	removeDelta := a.Data.Remove("k", a.NextDot()) // dot {1,2}
 
 	b := NewLWWMapReplica[string](2, StringCodec{})

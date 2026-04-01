@@ -18,6 +18,10 @@ type ReplicaID = uint64
 //
 // Users call domain-specific mutation methods on Data (e.g., Data.Put,
 // Data.Add) and replication methods on Replica (ApplyDelta, DeltasSince).
+//
+// A Replica is NOT safe for concurrent use. All mutations, delta
+// applications, and reads must be serialized by the caller. This includes
+// calls to Data methods, NextDot, ApplyDelta, and DeltasSince.
 type Replica[M Mergeable] struct {
 	// Data is the CRDT storage type. Use it for domain operations (Put,
 	// Get, Add, Remove, etc.) and for reading state.

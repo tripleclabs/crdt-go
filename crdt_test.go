@@ -103,7 +103,10 @@ func TestMVRegister_SetValues(t *testing.T) {
 
 func TestMVRegister_SetEntries(t *testing.T) {
 	r := NewMVRegister(StringCodec{})
-	r.SetEntries([]struct{ ValBytes []byte; Dot Dot }{
+	r.SetEntries([]struct {
+		ValBytes []byte
+		Dot      Dot
+	}{
 		{[]byte("a"), Dot{1, 1}},
 		{[]byte("b"), Dot{2, 1}},
 	})

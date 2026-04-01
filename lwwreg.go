@@ -13,6 +13,7 @@ type LWWRegister[V any] struct {
 
 // NewLWWRegister returns an initialized LWWRegister.
 func NewLWWRegister[V any](codec Codec[V]) *LWWRegister[V] {
+	requireCodec(codec)
 	return &LWWRegister[V]{codec: codec}
 }
 
@@ -101,7 +102,10 @@ func (r *LWWRegister[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
 	if off+16 > len(delta) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(delta[off:])
+	dot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	return DeltaInfo{
 		Key:  "",
 		Meta: delta[off : off+16],
@@ -118,7 +122,10 @@ func (r *LWWRegister[V]) Apply(delta []byte) error {
 	if off+16 > len(delta) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(delta[off:])
+	remoteDot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return err
+	}
 	r.SetBytes(valBytes, remoteDot)
 	return nil
 }

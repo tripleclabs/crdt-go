@@ -13,6 +13,7 @@ type AWLWWMap[V any] struct {
 // NewAWLWWMap returns an initialized AWLWWMap. Use [NewAWLWWMapReplica] to
 // create a fully wired Replica.
 func NewAWLWWMap[V any](codec Codec[V], opts ...Option) *AWLWWMap[V] {
+	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
@@ -79,7 +80,10 @@ func (m *AWLWWMap[V]) Get(key string) (V, Dot, bool) {
 	if err != nil {
 		return zero, Dot{}, false
 	}
-	dot, _ := DecodeDot(metaBytes)
+	dot, err := DecodeDot(metaBytes)
+	if err != nil {
+		return zero, Dot{}, false
+	}
 	return v, dot, true
 }
 
@@ -89,7 +93,10 @@ func (m *AWLWWMap[V]) GetBytes(key string) ([]byte, Dot, bool) {
 	if !ok {
 		return nil, Dot{}, false
 	}
-	dot, _ := DecodeDot(metaBytes)
+	dot, err := DecodeDot(metaBytes)
+	if err != nil {
+		return nil, Dot{}, false
+	}
 	return valBytes, dot, true
 }
 
@@ -99,7 +106,10 @@ func (m *AWLWWMap[V]) GetTombstone(key string) (Dot, VClock, bool) {
 	if !ok {
 		return Dot{}, nil, false
 	}
-	dot, ctx := decodeAWTombstone(metaBytes)
+	dot, ctx, err := decodeAWTombstone(metaBytes)
+	if err != nil {
+		return Dot{}, nil, false
+	}
 	return dot, ctx, true
 }
 
@@ -110,7 +120,10 @@ func (m *AWLWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
 		if err != nil {
 			return true
 		}
-		dot, _ := DecodeDot(metaBytes)
+		dot, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true
+		}
 		return fn(key, v, dot)
 	})
 }
@@ -118,7 +131,10 @@ func (m *AWLWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
 // RangeTombstones calls fn for each tombstone.
 func (m *AWLWWMap[V]) RangeTombstones(fn func(key string, dot Dot, context VClock) bool) {
 	m.backend.RangeTombstones(func(key string, metaBytes []byte) bool {
-		dot, ctx := decodeAWTombstone(metaBytes)
+		dot, ctx, err := decodeAWTombstone(metaBytes)
+		if err != nil {
+			return true
+		}
 		return fn(key, dot, ctx)
 	})
 }
@@ -171,7 +187,10 @@ func (m *AWLWWMap[V]) parsePutDelta(data []byte) (DeltaInfo, error) {
 	if off+16 > len(data) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(data[off:])
+	dot, err := DecodeDot(data[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	return DeltaInfo{
 		Op:   OpPut,
 		Key:  string(keyBytes),
@@ -188,7 +207,10 @@ func (m *AWLWWMap[V]) parseRemoveDelta(data []byte) (DeltaInfo, error) {
 	if off+16 > len(data) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(data[off:])
+	dot, err := DecodeDot(data[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	// Context is everything after the 16-byte dot.
 	context := data[off+16:]
 	return DeltaInfo{
@@ -228,7 +250,10 @@ func (m *AWLWWMap[V]) applyPut(data []byte) error {
 	if off+16 > len(data) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(data[off:])
+	remoteDot, err := DecodeDot(data[off:])
+	if err != nil {
+		return err
+	}
 	m.PutBytes(string(keyBytes), valBytes, remoteDot)
 	return nil
 }
@@ -241,7 +266,10 @@ func (m *AWLWWMap[V]) applyRemove(data []byte) error {
 	if off+16 > len(data) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(data[off:])
+	remoteDot, err := DecodeDot(data[off:])
+	if err != nil {
+		return err
+	}
 	off += 16
 	remoteCtx, err := DecodeVClock(data[off:])
 	if err != nil {
@@ -257,7 +285,10 @@ func (m *AWLWWMap[V]) DeltasSince(peerHWM VClock) [][]byte {
 	var deltas [][]byte
 
 	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
-		dot, _ := DecodeDot(metaBytes)
+		dot, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true
+		}
 		if dot.Counter > peerHWM.Get(dot.Replica) {
 			buf := []byte{OpPut}
 			buf = AppendVarintBytes(buf, []byte(key))
@@ -291,8 +322,14 @@ func encodeAWTombstone(d Dot, ctx VClock) []byte {
 	return out
 }
 
-func decodeAWTombstone(b []byte) (Dot, VClock) {
-	d, _ := DecodeDot(b)
-	ctx, _ := DecodeVClock(b[16:])
-	return d, ctx
+func decodeAWTombstone(b []byte) (Dot, VClock, error) {
+	d, err := DecodeDot(b)
+	if err != nil {
+		return Dot{}, nil, err
+	}
+	ctx, err := DecodeVClock(b[16:])
+	if err != nil {
+		return Dot{}, nil, err
+	}
+	return d, ctx, nil
 }

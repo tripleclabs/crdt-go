@@ -18,6 +18,7 @@ type GList[V any] struct {
 // NewGList returns an initialized GList. Use [NewGListReplica] to create
 // a fully wired Replica.
 func NewGList[V any](codec Codec[V], opts ...Option) *GList[V] {
+	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
@@ -79,7 +80,11 @@ func (l *GList[V]) Items() ([]V, error) {
 			decErr = err
 			return false
 		}
-		d, _ := DecodeDot(metaBytes)
+		d, err := DecodeDot(metaBytes)
+		if err != nil {
+			decErr = err
+			return false
+		}
 		items = append(items, item{value: v, dot: d})
 		return true
 	})
@@ -102,7 +107,10 @@ func (l *GList[V]) Items() ([]V, error) {
 // Range calls fn for each item with raw bytes, in unspecified order.
 func (l *GList[V]) Range(fn func(valBytes []byte, dot Dot) bool) {
 	l.backend.RangeEntries(func(_ string, valBytes []byte, metaBytes []byte) bool {
-		d, _ := DecodeDot(metaBytes)
+		d, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true
+		}
 		return fn(valBytes, d)
 	})
 }
@@ -135,7 +143,10 @@ func (l *GList[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
 	if off+16 > len(delta) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(delta[off:])
+	dot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	key := fmt.Sprintf("%d:%d", dot.Replica, dot.Counter)
 	return DeltaInfo{
 		Op:   OpPut,
@@ -155,7 +166,10 @@ func (l *GList[V]) Apply(delta []byte) error {
 	if off+16 > len(delta) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(delta[off:])
+	remoteDot, err := DecodeDot(delta[off:])
+	if err != nil {
+		return err
+	}
 	if !l.Has(remoteDot) {
 		l.AppendBytes(valBytes, remoteDot)
 	}

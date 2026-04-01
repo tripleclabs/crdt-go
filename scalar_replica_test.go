@@ -96,8 +96,8 @@ func TestGCounterReplica_FiveNodes(t *testing.T) {
 
 func TestPNCounterReplica_IncrementDecrement(t *testing.T) {
 	r := NewPNCounterReplica(1)
-	r.Data.Increment(r.Local.Replica(), 10)
-	r.Data.Decrement(r.Local.Replica(), 3)
+	r.Data.Increment(r.Local.Replica(), 10, r.NextDot())
+	r.Data.Decrement(r.Local.Replica(), 3, r.NextDot())
 	if r.Data.Int64() != 7 {
 		t.Fatalf("expected 7, got %d", r.Data.Int64())
 	}
@@ -106,9 +106,9 @@ func TestPNCounterReplica_IncrementDecrement(t *testing.T) {
 func TestPNCounterReplica_ApplyDelta(t *testing.T) {
 	a := NewPNCounterReplica(1)
 	b := NewPNCounterReplica(2)
-	dInc := a.Data.Increment(a.Local.Replica(), 10)
-	dDec := a.Data.Decrement(a.Local.Replica(), 2)
-	db := b.Data.Increment(b.Local.Replica(), 5)
+	dInc := a.Data.Increment(a.Local.Replica(), 10, a.NextDot())
+	dDec := a.Data.Decrement(a.Local.Replica(), 2, a.NextDot())
+	db := b.Data.Increment(b.Local.Replica(), 5, b.NextDot())
 
 	a.ApplyDelta(db)
 	b.ApplyDelta(dInc)
@@ -122,7 +122,7 @@ func TestPNCounterReplica_ApplyDelta(t *testing.T) {
 func TestPNCounterReplica_Idempotent(t *testing.T) {
 	a := NewPNCounterReplica(1)
 	b := NewPNCounterReplica(2)
-	d := a.Data.Increment(a.Local.Replica(), 5)
+	d := a.Data.Increment(a.Local.Replica(), 5, a.NextDot())
 	b.ApplyDelta(d)
 	b.ApplyDelta(d)
 	if b.Data.Int64() != 5 {
@@ -133,12 +133,9 @@ func TestPNCounterReplica_Idempotent(t *testing.T) {
 func TestPNCounterReplica_AntiEntropy(t *testing.T) {
 	a := NewPNCounterReplica(1)
 	b := NewPNCounterReplica(2)
-	a.Data.Increment(a.Local.Replica(), 10)
-	a.Received.Record(1, 10)
-	a.Data.Decrement(a.Local.Replica(), 3)
-	a.Received.Record(1, 13) // combined pos+neg
-	b.Data.Increment(b.Local.Replica(), 5)
-	b.Received.Record(2, 5)
+	a.Data.Increment(a.Local.Replica(), 10, a.NextDot())
+	a.Data.Decrement(a.Local.Replica(), 3, a.NextDot())
+	b.Data.Increment(b.Local.Replica(), 5, b.NextDot())
 
 	for _, d := range a.DeltasSince(b.HWM()) {
 		b.ApplyDelta(d)
@@ -148,6 +145,27 @@ func TestPNCounterReplica_AntiEntropy(t *testing.T) {
 	}
 	if a.Data.Int64() != b.Data.Int64() {
 		t.Fatalf("expected convergence, got a=%d b=%d", a.Data.Int64(), b.Data.Int64())
+	}
+}
+
+func TestPNCounterReplica_AntiEntropy_LostDelta(t *testing.T) {
+	// Regression: a lower-count side must not be lost when a higher-count
+	// side has already been received (the bug that motivated dot tracking).
+	a := NewPNCounterReplica(1)
+	dInc := a.Data.Increment(a.Local.Replica(), 10, a.NextDot()) // dot {1,1}
+	_ = a.Data.Decrement(a.Local.Replica(), 3, a.NextDot())      // dot {1,2} — "lost"
+
+	b := NewPNCounterReplica(2)
+	// b receives ONLY the increment, not the decrement.
+	b.ApplyDelta(dInc)
+	// HWM[1] = 1 (dot counter, not data value).
+
+	// Anti-entropy should recover the decrement.
+	for _, d := range a.DeltasSince(b.HWM()) {
+		b.ApplyDelta(d)
+	}
+	if b.Data.Int64() != 7 {
+		t.Fatalf("expected 7 (10 - 3), got %d", b.Data.Int64())
 	}
 }
 

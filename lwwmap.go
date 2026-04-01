@@ -12,6 +12,7 @@ type LWWMap[V any] struct {
 // NewLWWMap returns an initialized LWWMap. Use [NewLWWMapReplica] to create
 // a fully wired Replica.
 func NewLWWMap[V any](codec Codec[V], opts ...Option) *LWWMap[V] {
+	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
@@ -79,7 +80,10 @@ func (m *LWWMap[V]) Get(key string) (V, Dot, bool) {
 	if err != nil {
 		return zero, Dot{}, false
 	}
-	dot, _ := DecodeDot(metaBytes)
+	dot, err := DecodeDot(metaBytes)
+	if err != nil {
+		return zero, Dot{}, false
+	}
 	return v, dot, true
 }
 
@@ -89,7 +93,10 @@ func (m *LWWMap[V]) GetBytes(key string) ([]byte, Dot, bool) {
 	if !ok {
 		return nil, Dot{}, false
 	}
-	dot, _ := DecodeDot(metaBytes)
+	dot, err := DecodeDot(metaBytes)
+	if err != nil {
+		return nil, Dot{}, false
+	}
 	return valBytes, dot, true
 }
 
@@ -99,7 +106,10 @@ func (m *LWWMap[V]) GetTombstone(key string) (Dot, bool) {
 	if !ok {
 		return Dot{}, false
 	}
-	dot, _ := DecodeDot(metaBytes)
+	dot, err := DecodeDot(metaBytes)
+	if err != nil {
+		return Dot{}, false
+	}
 	return dot, true
 }
 
@@ -110,7 +120,10 @@ func (m *LWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
 		if err != nil {
 			return true // skip decode errors
 		}
-		dot, _ := DecodeDot(metaBytes)
+		dot, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true // skip corrupted entry
+		}
 		return fn(key, v, dot)
 	})
 }
@@ -118,7 +131,10 @@ func (m *LWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
 // RangeBytes calls fn for each live entry with raw value bytes.
 func (m *LWWMap[V]) RangeBytes(fn func(key string, valBytes []byte, dot Dot) bool) {
 	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
-		dot, _ := DecodeDot(metaBytes)
+		dot, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true // skip corrupted entry
+		}
 		return fn(key, valBytes, dot)
 	})
 }
@@ -126,7 +142,10 @@ func (m *LWWMap[V]) RangeBytes(fn func(key string, valBytes []byte, dot Dot) boo
 // RangeTombstones calls fn for each tombstone.
 func (m *LWWMap[V]) RangeTombstones(fn func(key string, dot Dot) bool) {
 	m.backend.RangeTombstones(func(key string, metaBytes []byte) bool {
-		dot, _ := DecodeDot(metaBytes)
+		dot, err := DecodeDot(metaBytes)
+		if err != nil {
+			return true // skip corrupted entry
+		}
 		return fn(key, dot)
 	})
 }
@@ -180,7 +199,10 @@ func (m *LWWMap[V]) parsePutDelta(data []byte) (DeltaInfo, error) {
 	if off+16 > len(data) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(data[off:])
+	dot, err := DecodeDot(data[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	return DeltaInfo{
 		Op:   OpPut,
 		Key:  string(keyBytes),
@@ -197,7 +219,10 @@ func (m *LWWMap[V]) parseRemoveDelta(data []byte) (DeltaInfo, error) {
 	if off+16 > len(data) {
 		return DeltaInfo{}, ErrShortBuffer
 	}
-	dot, _ := DecodeDot(data[off:])
+	dot, err := DecodeDot(data[off:])
+	if err != nil {
+		return DeltaInfo{}, err
+	}
 	return DeltaInfo{
 		Op:   OpRemove,
 		Key:  string(keyBytes),
@@ -234,7 +259,10 @@ func (m *LWWMap[V]) applyPut(data []byte) error {
 	if off+16 > len(data) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(data[off:])
+	remoteDot, err := DecodeDot(data[off:])
+	if err != nil {
+		return err
+	}
 	m.PutBytes(string(keyBytes), valBytes, remoteDot)
 	return nil
 }
@@ -247,7 +275,10 @@ func (m *LWWMap[V]) applyRemove(data []byte) error {
 	if off+16 > len(data) {
 		return ErrShortBuffer
 	}
-	remoteDot, _ := DecodeDot(data[off:])
+	remoteDot, err := DecodeDot(data[off:])
+	if err != nil {
+		return err
+	}
 	m.Remove(string(keyBytes), remoteDot)
 	return nil
 }
