@@ -48,6 +48,7 @@ type replica[M mergeable] struct {
 	concern    WriteConcern
 	aeInterval time.Duration
 	aeStop     chan struct{}
+	peerHWMs   map[ReplicaID]VClock
 }
 
 // newReplica creates a replica with the given storage and clock strategy.
@@ -68,6 +69,7 @@ func newReplica[M mergeable](replicaID ReplicaID, data M, strategy clock, opts .
 		topology:   o.topology,
 		concern:    o.concern,
 		aeInterval: aeInterval,
+		peerHWMs:   make(map[ReplicaID]VClock),
 	}
 	if o.transport != nil {
 		o.transport.OnReceive(func(msg TransportMessage) {
@@ -237,6 +239,14 @@ func (r *replica[M]) sendDigests() {
 	r.mu.Lock()
 	hash := r.merkle.Hash()
 	hwm := r.received.HWM()
+	// GC tombstones if all known peers have advanced past them.
+	if gc, ok := any(r.data).(tombstoneGCer); ok && len(r.peerHWMs) > 0 {
+		minHWM := hwm.Clone()
+		for _, ph := range r.peerHWMs {
+			minHWM = minHWM.LowerBound(ph)
+		}
+		gc.GCTombstones(minHWM)
+	}
 	r.mu.Unlock()
 
 	msg := encodeAEDigest(hash, hwm)
@@ -255,6 +265,7 @@ func (r *replica[M]) handleSyncDigest(from ReplicaID, payload []byte) {
 	}
 
 	r.mu.Lock()
+	r.peerHWMs[from] = peerHWM
 	localHash := r.merkle.Hash()
 	if localHash == peerHash {
 		r.mu.Unlock()

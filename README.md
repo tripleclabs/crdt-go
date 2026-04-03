@@ -69,6 +69,40 @@ m.Len()
 m.Range(func(key string, value string) bool { return true })
 ```
 
+### DeltaMap[K] — Composable CRDT map
+
+A map whose values are themselves CRDTs. Uses a shared causal context, composite deltas, and DSON-style tombstone-free removes with add-wins semantics.
+
+The kind type parameter `K` determines the inner CRDT type and constrains which mutations and queries are accepted at compile time.
+
+```go
+// Map of node IDs to sets of topics (pubsub registry).
+byNode := crdt.NewDeltaMap(id, crdt.ORSetKind[string]{Codec: crdt.StringCodec{}}, opts...)
+
+// Mutations — type-safe via phantom kind types.
+byNode.Mutate(ctx, "node-1", crdt.AddSetMember[string]{Value: "chat.general"})
+byNode.Mutate(ctx, "node-1", crdt.AddSetMember[string]{Value: "chat.dev"})
+
+// Queries.
+ok := byNode.Query("node-1", crdt.ContainsSetMember[string]{Value: "chat.general"}).(bool)
+elems := byNode.Query("node-1", crdt.SetElements[string]{}).([]string)
+count := byNode.Query("node-1", crdt.SetLen[string]{}).(int)
+
+// Cascading remove — node leaves, all its topics are pruned.
+// Tombstone-free: no metadata accumulates after removal.
+// Concurrent adds from other nodes survive (add-wins).
+byNode.RemoveKey(ctx, "node-1")
+
+// Map-level queries.
+byNode.HasKey("node-1")
+byNode.Keys()
+byNode.Len()
+```
+
+**Available ORSet mutations:** `AddSetMember[E]`, `RemoveSetMember[E]`
+
+**Available ORSet queries:** `ContainsSetMember[E]`, `SetElements[E]`, `SetLen[E]`
+
 ### AWLWWMap[V] — Add-wins LWW map
 
 Like LWWMap but concurrent puts beat concurrent removes.

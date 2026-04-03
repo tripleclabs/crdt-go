@@ -106,21 +106,20 @@ func (s *ORSet[E]) Add(ctx context.Context, elem E) (*WriteResult, error) {
 	return s.r.propagate(ctx, dot, delta), nil
 }
 
-// Remove removes an element. Remove deltas are context-based (no dot)
-// and are broadcast fire-and-forget.
-func (s *ORSet[E]) Remove(ctx context.Context, elem E) error {
+// Remove removes an element.
+func (s *ORSet[E]) Remove(ctx context.Context, elem E) (*WriteResult, error) {
 	s.r.mu.Lock()
-	delta, err := s.r.data.Remove(elem, s.r.received.HWM())
+	dot := s.r.nextDot()
+	delta, err := s.r.data.Remove(elem, dot, s.r.received.HWM())
 	if err != nil {
 		s.r.mu.Unlock()
-		return err
+		return nil, err
 	}
 	if info, e := s.r.data.ParseDelta(delta); e == nil {
 		s.r.trackKey(info.Key)
 	}
 	s.r.mu.Unlock()
-	s.r.broadcast(ctx, Dot{}, delta)
-	return nil
+	return s.r.propagate(ctx, dot, delta), nil
 }
 
 func (s *ORSet[E]) Contains(elem E) bool {
@@ -176,12 +175,13 @@ func (m *ORMap[V]) Put(ctx context.Context, key string, value V) (*WriteResult, 
 	return m.r.propagate(ctx, dot, delta), nil
 }
 
-func (m *ORMap[V]) Remove(ctx context.Context, key string) {
+func (m *ORMap[V]) Remove(ctx context.Context, key string) *WriteResult {
 	m.r.mu.Lock()
-	delta := m.r.data.Remove(key, m.r.received.HWM())
+	dot := m.r.nextDot()
+	delta := m.r.data.Remove(key, dot, m.r.received.HWM())
 	m.r.trackKey(key)
 	m.r.mu.Unlock()
-	m.r.broadcast(ctx, Dot{}, delta)
+	return m.r.propagate(ctx, dot, delta)
 }
 
 func (m *ORMap[V]) Get(key string) (V, bool) {

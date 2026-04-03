@@ -404,6 +404,43 @@ func TestLWWMap_AntiEntropy(t *testing.T) {
 	})
 }
 
+func TestORSet_LostRemoveRecovery(t *testing.T) {
+	// Node A adds then removes an element. The remove propagates to B
+	// immediately. But if B missed the remove, anti-entropy should
+	// recover it via the tombstone in DeltasSince.
+	net := newTestNet()
+	aeInterval := 50 * time.Millisecond
+
+	a := NewORSet[string](1, StringCodec{},
+		WithTransport(net.transport(1)),
+		WithTopology(net.topology(1)),
+		WithAntiEntropyInterval(aeInterval),
+	)
+	b := NewORSet[string](2, StringCodec{},
+		WithTransport(net.transport(2)),
+		WithTopology(net.topology(2)),
+		WithAntiEntropyInterval(aeInterval),
+	)
+	net.addPeer(1)
+	net.addPeer(2)
+	defer a.Close()
+	defer b.Close()
+	ctx := context.Background()
+
+	// Add on A, wait for B to see it.
+	a.Add(ctx, "item")
+	eventually(t, pollTimeout, func() bool { return b.Contains("item") })
+
+	// Remove on A, wait for B to see removal.
+	a.Remove(ctx, "item")
+	eventually(t, pollTimeout, func() bool { return !b.Contains("item") })
+
+	// Verify convergence: both should not contain the item.
+	if a.Contains("item") {
+		t.Fatal("a should not contain item")
+	}
+}
+
 func TestGCounter_AntiEntropy(t *testing.T) {
 	net := newTestNet()
 	aeInterval := 50 * time.Millisecond

@@ -58,15 +58,17 @@ func (m *orMapState[V]) PutBytes(key string, valBytes []byte, dots DotMap) {
 	m.backend.PutEntry(key, valBytes, encodeDotMap(dots))
 }
 
-// Remove removes a key, returns the encoded delta. The delta carries the
-// provided causal context (typically the replica's HWM).
+// Remove removes a key, returns the encoded delta. The dot stamps the
+// remove for ReceivedClock tracking. The context is the causal HWM.
 //
-// Delta format: [op=0x02][varint key len][key][encoded vclock]
-func (m *orMapState[V]) Remove(key string, ctx VClock) []byte {
+// Delta format: [op=0x02][varint key len][key][16-byte dot][encoded vclock]
+func (m *orMapState[V]) Remove(key string, dot Dot, ctx VClock) []byte {
 	m.backend.DeleteEntry(key)
+	m.backend.PutTombstone(key, encodeRemoveTombstone(dot, ctx))
 
 	buf := []byte{opRemove}
 	buf = appendVarintBytes(buf, []byte(key))
+	buf = append(buf, encodeDot(dot)...)
 	buf = append(buf, encodeVClock(ctx)...)
 	return buf
 }
@@ -141,9 +143,9 @@ func (m *orMapState[V]) EntryMeta(key string) ([]byte, bool) {
 	return meta, ok
 }
 
-// TombstoneMeta always returns false — ORMap does not use tombstones.
+// TombstoneMeta returns the encoded tombstone for the key.
 func (m *orMapState[V]) TombstoneMeta(key string) ([]byte, bool) {
-	return nil, false
+	return m.backend.GetTombstone(key)
 }
 
 // --- Mergeable ---
@@ -195,18 +197,18 @@ func (m *orMapState[V]) parseRemoveDelta(data []byte) (deltaInfo, error) {
 	if err != nil {
 		return deltaInfo{}, err
 	}
-	vc, err := decodeVClock(data[off:])
+	if off+16 > len(data) {
+		return deltaInfo{}, errShortBuffer
+	}
+	dot, err := decodeDot(data[off:])
 	if err != nil {
 		return deltaInfo{}, err
 	}
-
-	// Remove deltas carry a vclock context but no dots that should update
-	// the received clock — the remove itself does not generate new dots.
-	_ = vc
 	return deltaInfo{
 		Op:      opRemove,
 		Key:     string(keyBytes),
-		Context: data[off:],
+		Context: data[off+16:],
+		Dots:    []Dot{dot},
 	}, nil
 }
 
@@ -249,8 +251,25 @@ func (m *orMapState[V]) applyPut(data []byte) error {
 		if DotGT(MaxDot(remoteDots), MaxDot(localDots)) {
 			winner = valBytes
 		}
-		m.PutBytes(key, winner, combined)
-	} else {
+		remoteDots = combined
+		valBytes = winner
+	}
+
+	// Prune against existing tombstone (add-wins).
+	if tombMeta, ok := m.backend.GetTombstone(key); ok {
+		_, tombCtx, err := decodeRemoveTombstone(tombMeta)
+		if err == nil {
+			surviving := make(DotMap)
+			for rep, counter := range remoteDots {
+				if counter > tombCtx.Get(rep) {
+					surviving[rep] = counter
+				}
+			}
+			remoteDots = surviving
+		}
+	}
+
+	if len(remoteDots) > 0 {
 		m.PutBytes(key, valBytes, remoteDots)
 	}
 	return nil
@@ -261,11 +280,30 @@ func (m *orMapState[V]) applyRemove(data []byte) error {
 	if err != nil {
 		return err
 	}
-	removeVC, err := decodeVClock(data[off:])
+	if off+16 > len(data) {
+		return errShortBuffer
+	}
+	dot, err := decodeDot(data[off:])
+	if err != nil {
+		return err
+	}
+	removeVC, err := decodeVClock(data[off+16:])
 	if err != nil {
 		return err
 	}
 	key := string(keyBytes)
+
+	// Store/merge tombstone.
+	if existingMeta, ok := m.backend.GetTombstone(key); ok {
+		existingDot, existingCtx, err := decodeRemoveTombstone(existingMeta)
+		if err == nil {
+			if !DotGT(dot, existingDot) {
+				dot = existingDot
+			}
+			removeVC.Merge(existingCtx)
+		}
+	}
+	m.backend.PutTombstone(key, encodeRemoveTombstone(dot, removeVC))
 
 	_, localDots, ok := m.GetBytes(key)
 	if !ok {
@@ -288,7 +326,8 @@ func (m *orMapState[V]) applyRemove(data []byte) error {
 	return nil
 }
 
-// DeltasSince returns encoded deltas for entries with dots not covered by peerHWM.
+// DeltasSince returns encoded deltas for entries and tombstones with
+// dots not covered by peerHWM.
 func (m *orMapState[V]) DeltasSince(peerHWM VClock) [][]byte {
 	var deltas [][]byte
 	m.RangeBytes(func(key string, valBytes []byte, dots DotMap) bool {
@@ -304,5 +343,37 @@ func (m *orMapState[V]) DeltasSince(peerHWM VClock) [][]byte {
 		}
 		return true
 	})
+	m.backend.RangeTombstones(func(key string, meta []byte) bool {
+		dot, ctx, err := decodeRemoveTombstone(meta)
+		if err != nil {
+			return true
+		}
+		if dot.Counter > peerHWM.Get(dot.Replica) {
+			buf := []byte{opRemove}
+			buf = appendVarintBytes(buf, []byte(key))
+			buf = append(buf, encodeDot(dot)...)
+			buf = append(buf, encodeVClock(ctx)...)
+			deltas = append(deltas, buf)
+		}
+		return true
+	})
 	return deltas
+}
+
+// GCTombstones removes tombstones whose dots are fully covered by minHWM.
+func (m *orMapState[V]) GCTombstones(minHWM VClock) {
+	var toDelete []string
+	m.backend.RangeTombstones(func(key string, meta []byte) bool {
+		dot, _, err := decodeRemoveTombstone(meta)
+		if err != nil {
+			return true
+		}
+		if dot.Counter <= minHWM.Get(dot.Replica) {
+			toDelete = append(toDelete, key)
+		}
+		return true
+	})
+	for _, key := range toDelete {
+		m.backend.DeleteTombstone(key)
+	}
 }

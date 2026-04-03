@@ -59,3 +59,10 @@ type mergeable interface {
 	// DeltasSince returns encoded deltas for state not covered by peerHWM.
 	DeltasSince(peerHWM VClock) [][]byte
 }
+
+// tombstoneGCer is optionally implemented by mergeable types that store
+// tombstones. The replica calls GCTombstones periodically to clean up
+// tombstones that all peers have seen.
+type tombstoneGCer interface {
+	GCTombstones(minHWM VClock)
+}

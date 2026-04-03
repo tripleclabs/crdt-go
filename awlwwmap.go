@@ -55,7 +55,7 @@ func (m *awLWWMapState[V]) PutBytes(key string, valBytes []byte, dot Dot) {
 // Delta format: [op=0x02][varint key len][key][16 byte dot][encoded vclock]
 func (m *awLWWMapState[V]) Remove(key string, dot Dot, context VClock) []byte {
 	m.backend.DeleteEntry(key)
-	m.backend.PutTombstone(key, encodeAWTombstone(dot, context))
+	m.backend.PutTombstone(key, encodeRemoveTombstone(dot, context))
 
 	buf := []byte{opRemove}
 	buf = appendVarintBytes(buf, []byte(key))
@@ -101,7 +101,7 @@ func (m *awLWWMapState[V]) GetTombstone(key string) (Dot, VClock, bool) {
 	if !ok {
 		return Dot{}, nil, false
 	}
-	dot, ctx, err := decodeAWTombstone(metaBytes)
+	dot, ctx, err := decodeRemoveTombstone(metaBytes)
 	if err != nil {
 		return Dot{}, nil, false
 	}
@@ -126,7 +126,7 @@ func (m *awLWWMapState[V]) Range(fn func(key string, value V, dot Dot) bool) {
 // RangeTombstones calls fn for each tombstone.
 func (m *awLWWMapState[V]) RangeTombstones(fn func(key string, dot Dot, context VClock) bool) {
 	m.backend.RangeTombstones(func(key string, metaBytes []byte) bool {
-		dot, ctx, err := decodeAWTombstone(metaBytes)
+		dot, ctx, err := decodeRemoveTombstone(metaBytes)
 		if err != nil {
 			return true
 		}
@@ -308,7 +308,7 @@ func (m *awLWWMapState[V]) DeltasSince(peerHWM VClock) [][]byte {
 	return deltas
 }
 
-func encodeAWTombstone(d Dot, ctx VClock) []byte {
+func encodeRemoveTombstone(d Dot, ctx VClock) []byte {
 	dotBytes := encodeDot(d)
 	ctxBytes := encodeVClock(ctx)
 	out := make([]byte, len(dotBytes)+len(ctxBytes))
@@ -317,7 +317,7 @@ func encodeAWTombstone(d Dot, ctx VClock) []byte {
 	return out
 }
 
-func decodeAWTombstone(b []byte) (Dot, VClock, error) {
+func decodeRemoveTombstone(b []byte) (Dot, VClock, error) {
 	d, err := decodeDot(b)
 	if err != nil {
 		return Dot{}, nil, err

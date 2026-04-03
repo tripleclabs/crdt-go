@@ -204,7 +204,7 @@ func TestORSet_PutContains(t *testing.T) {
 func TestORSet_Remove(t *testing.T) {
 	s := newORSetState(StringCodec{})
 	s.Put("alice", DotMap{1: 1})
-	s.Remove("alice", VClock{})
+	s.Remove("alice", Dot{Replica: 1, Counter: 2}, VClock{})
 	if s.Contains("alice") {
 		t.Fatal("should be removed")
 	}
@@ -254,7 +254,7 @@ func TestORMap_PutGet(t *testing.T) {
 func TestORMap_Remove(t *testing.T) {
 	m := newORMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
-	m.Remove("k", VClock{1: 1})
+	m.Remove("k", Dot{Replica: 1, Counter: 2}, VClock{1: 1})
 	_, _, ok := m.Get("k")
 	if ok {
 		t.Fatal("should be removed")
