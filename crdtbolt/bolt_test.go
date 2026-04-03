@@ -214,9 +214,9 @@ func TestBoltBackend_WithLWWMap_Convergence(t *testing.T) {
 	a.Put(ctx, "from-a", "a-val")
 	b.Put(ctx, "from-b", "b-val")
 
-	if a.Len() != 2 || b.Len() != 2 {
-		t.Fatalf("expected both 2, got a=%d b=%d", a.Len(), b.Len())
-	}
+	eventually(t, pollTimeout, func() bool {
+		return a.Len() == 2 && b.Len() == 2
+	})
 }
 
 func TestBoltBackend_WithORSet(t *testing.T) {

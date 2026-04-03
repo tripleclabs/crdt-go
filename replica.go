@@ -163,8 +163,9 @@ func tagDelta(delta []byte) []byte {
 }
 
 // propagate sends a tagged delta to all peers in parallel and returns a
-// WriteResult for optional quorum waiting. Does NOT hold mu.
-func (r *replica[M]) propagate(ctx context.Context, dot Dot, delta []byte) *WriteResult {
+// WriteResult for optional quorum waiting. Does NOT hold mu. Does not
+// block on Send — ack channels are collected asynchronously.
+func (r *replica[M]) propagate(ctx context.Context, d Dot, delta []byte) *WriteResult {
 	if r.transport == nil || r.topology == nil {
 		return &WriteResult{}
 	}
@@ -173,44 +174,38 @@ func (r *replica[M]) propagate(ctx context.Context, dot Dot, delta []byte) *Writ
 		return &WriteResult{}
 	}
 	tagged := tagDelta(delta)
-	ack := r.concern > WLocal
-	chs := make([]<-chan struct{}, len(peers))
-	var wg sync.WaitGroup
-	for i, peer := range peers {
-		wg.Add(1)
-		go func(i int, peer ReplicaID) {
-			defer wg.Done()
-			ch, _ := r.transport.Send(ctx, peer, TransportMessage{dot: dot, delta: tagged, ack: ack})
-			chs[i] = ch
-		}(i, peer)
-	}
-	wg.Wait()
-	var acks []<-chan struct{}
-	for _, ch := range chs {
-		if ch != nil {
-			acks = append(acks, ch)
+	needed := r.quorumSize(len(peers))
+	if needed == 0 {
+		for _, peer := range peers {
+			peer := peer
+			go r.transport.Send(ctx, peer, TransportMessage{dot: d, delta: tagged})
 		}
+		return &WriteResult{}
 	}
-	return &WriteResult{acks: acks, needed: r.quorumSize(len(peers))}
+	ackCh := make(chan (<-chan struct{}), len(peers))
+	for _, peer := range peers {
+		peer := peer
+		go func() {
+			ch, _ := r.transport.Send(ctx, peer, TransportMessage{dot: d, delta: tagged, ack: true})
+			if ch != nil {
+				ackCh <- ch
+			}
+		}()
+	}
+	return &WriteResult{ackCh: ackCh, needed: needed, total: len(peers)}
 }
 
 // broadcast sends a tagged delta to all peers fire-and-forget (no acks).
 // Used for context-only removes (ORSet, ORMap). Does NOT hold mu.
-func (r *replica[M]) broadcast(ctx context.Context, dot Dot, delta []byte) {
+func (r *replica[M]) broadcast(ctx context.Context, d Dot, delta []byte) {
 	if r.transport == nil || r.topology == nil {
 		return
 	}
 	tagged := tagDelta(delta)
-	peers := r.topology.Peers()
-	var wg sync.WaitGroup
-	for _, peer := range peers {
-		wg.Add(1)
-		go func(peer ReplicaID) {
-			defer wg.Done()
-			r.transport.Send(ctx, peer, TransportMessage{dot: dot, delta: tagged})
-		}(peer)
+	for _, peer := range r.topology.Peers() {
+		peer := peer
+		go r.transport.Send(ctx, peer, TransportMessage{dot: d, delta: tagged})
 	}
-	wg.Wait()
 }
 
 // --- Anti-entropy ---
@@ -247,7 +242,8 @@ func (r *replica[M]) sendDigests() {
 	msg := encodeAEDigest(hash, hwm)
 	ctx := context.Background()
 	for _, peer := range peers {
-		r.transport.Send(ctx, peer, TransportMessage{delta: msg})
+		peer := peer
+		go r.transport.Send(ctx, peer, TransportMessage{delta: msg})
 	}
 }
 
@@ -269,7 +265,8 @@ func (r *replica[M]) handleSyncDigest(from ReplicaID, payload []byte) {
 
 	ctx := context.Background()
 	for _, d := range deltas {
-		r.transport.Send(ctx, from, TransportMessage{delta: tagDelta(d)})
+		d := d
+		go r.transport.Send(ctx, from, TransportMessage{delta: tagDelta(d)})
 	}
 }
 
@@ -319,8 +316,9 @@ func (r *replica[M]) quorumSize(peerCount int) int {
 // WriteResult tracks an in-flight write. Call [Wait] to block until
 // the configured write concern is satisfied.
 type WriteResult struct {
-	acks   []<-chan struct{}
+	ackCh  chan (<-chan struct{}) // ack channels arrive as Sends complete
 	needed int
+	total  int // total peers we're sending to
 }
 
 // Wait blocks until the write concern quorum is reached or ctx expires.
@@ -330,16 +328,29 @@ func (w *WriteResult) Wait(ctx context.Context) error {
 		return nil
 	}
 	got := 0
-	for _, ch := range w.acks {
+	received := 0
+	for received < w.total {
 		select {
-		case <-ch:
-			got++
-			if got >= w.needed {
-				return nil
+		case ack, ok := <-w.ackCh:
+			if !ok {
+				return ErrQuorumTimeout
+			}
+			received++
+			select {
+			case <-ack:
+				got++
+				if got >= w.needed {
+					return nil
+				}
+			case <-ctx.Done():
+				return ErrQuorumTimeout
 			}
 		case <-ctx.Done():
 			return ErrQuorumTimeout
 		}
 	}
-	return nil
+	if got >= w.needed {
+		return nil
+	}
+	return ErrQuorumTimeout
 }

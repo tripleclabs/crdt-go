@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+// eventually polls check until it returns true or timeout expires.
+func eventually(t *testing.T, timeout time.Duration, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not met within timeout")
+}
+
+const pollTimeout = 500 * time.Millisecond
+
 func twoNode[T any](t *testing.T, make func(id ReplicaID, opts ...Option) T) (T, T) {
 	t.Helper()
 	net := newTestNet()
@@ -41,10 +56,10 @@ func TestLWWMap_TwoNodeSync(t *testing.T) {
 	if _, err := a.Put(ctx, "key", "val"); err != nil {
 		t.Fatal(err)
 	}
-	v, ok := b.Get("key")
-	if !ok || v != "val" {
-		t.Fatalf("expected val, got %q ok=%v", v, ok)
-	}
+	eventually(t, pollTimeout, func() bool {
+		v, ok := b.Get("key")
+		return ok && v == "val"
+	})
 }
 
 func TestLWWMap_BidirectionalSync(t *testing.T) {
@@ -56,14 +71,14 @@ func TestLWWMap_BidirectionalSync(t *testing.T) {
 	a.Put(ctx, "from-a", "alice")
 	b.Put(ctx, "from-b", "bob")
 
-	v, ok := a.Get("from-b")
-	if !ok || v != "bob" {
-		t.Fatalf("a: expected bob, got %q ok=%v", v, ok)
-	}
-	v, ok = b.Get("from-a")
-	if !ok || v != "alice" {
-		t.Fatalf("b: expected alice, got %q ok=%v", v, ok)
-	}
+	eventually(t, pollTimeout, func() bool {
+		v, ok := a.Get("from-b")
+		return ok && v == "bob"
+	})
+	eventually(t, pollTimeout, func() bool {
+		v, ok := b.Get("from-a")
+		return ok && v == "alice"
+	})
 }
 
 func TestLWWMap_RemoveSync(t *testing.T) {
@@ -73,12 +88,15 @@ func TestLWWMap_RemoveSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Put(ctx, "key", "val")
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return ok
+	})
 	a.Remove(ctx, "key")
-
-	_, ok := b.Get("key")
-	if ok {
-		t.Fatal("expected key to be removed on b")
-	}
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return !ok
+	})
 }
 
 func TestLWWMap_ThreeNodeConvergence(t *testing.T) {
@@ -92,9 +110,10 @@ func TestLWWMap_ThreeNodeConvergence(t *testing.T) {
 	c.Put(ctx, "z", "from-c")
 
 	for _, n := range []*LWWMap[string]{a, b, c} {
-		if n.Len() != 3 {
-			t.Fatalf("expected 3, got %d", n.Len())
-		}
+		n := n
+		eventually(t, pollTimeout, func() bool {
+			return n.Len() == 3
+		})
 	}
 }
 
@@ -122,9 +141,9 @@ func TestORSet_TwoNodeSync(t *testing.T) {
 	a.Add(ctx, "apple")
 	a.Add(ctx, "banana")
 
-	if !b.Contains("apple") || !b.Contains("banana") {
-		t.Fatal("expected both elements on b")
-	}
+	eventually(t, pollTimeout, func() bool {
+		return b.Contains("apple") && b.Contains("banana")
+	})
 }
 
 func TestORSet_RemoveSync(t *testing.T) {
@@ -134,14 +153,14 @@ func TestORSet_RemoveSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Add(ctx, "x")
-	if !b.Contains("x") {
-		t.Fatal("expected x on b after add")
-	}
+	eventually(t, pollTimeout, func() bool {
+		return b.Contains("x")
+	})
 
 	a.Remove(ctx, "x")
-	if b.Contains("x") {
-		t.Fatal("expected x removed on b")
-	}
+	eventually(t, pollTimeout, func() bool {
+		return !b.Contains("x")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -155,10 +174,10 @@ func TestORMap_TwoNodeSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Put(ctx, "key", "val")
-	v, ok := b.Get("key")
-	if !ok || v != "val" {
-		t.Fatalf("expected val, got %q ok=%v", v, ok)
-	}
+	eventually(t, pollTimeout, func() bool {
+		v, ok := b.Get("key")
+		return ok && v == "val"
+	})
 }
 
 func TestORMap_RemoveSync(t *testing.T) {
@@ -168,12 +187,15 @@ func TestORMap_RemoveSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Put(ctx, "key", "val")
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return ok
+	})
 	a.Remove(ctx, "key")
-
-	_, ok := b.Get("key")
-	if ok {
-		t.Fatal("expected key removed on b")
-	}
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return !ok
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -187,10 +209,10 @@ func TestAWLWWMap_TwoNodeSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Put(ctx, "key", "val")
-	v, ok := b.Get("key")
-	if !ok || v != "val" {
-		t.Fatalf("expected val, got %q ok=%v", v, ok)
-	}
+	eventually(t, pollTimeout, func() bool {
+		v, ok := b.Get("key")
+		return ok && v == "val"
+	})
 }
 
 func TestAWLWWMap_RemoveSync(t *testing.T) {
@@ -200,12 +222,15 @@ func TestAWLWWMap_RemoveSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Put(ctx, "key", "val")
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return ok
+	})
 	a.Remove(ctx, "key")
-
-	_, ok := b.Get("key")
-	if ok {
-		t.Fatal("expected key removed on b")
-	}
+	eventually(t, pollTimeout, func() bool {
+		_, ok := b.Get("key")
+		return !ok
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -221,11 +246,14 @@ func TestGList_TwoNodeSync(t *testing.T) {
 	a.Append(ctx, "first")
 	a.Append(ctx, "second")
 
+	eventually(t, pollTimeout, func() bool {
+		return b.Len() == 2
+	})
 	items, err := b.Items()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0] != "first" || items[1] != "second" {
+	if items[0] != "first" || items[1] != "second" {
 		t.Fatalf("expected [first second], got %v", items)
 	}
 }
@@ -243,12 +271,9 @@ func TestGCounter_TwoNodeSync(t *testing.T) {
 	a.Increment(ctx, 5)
 	b.Increment(ctx, 3)
 
-	if a.Int64() != 8 {
-		t.Fatalf("a: expected 8, got %d", a.Int64())
-	}
-	if b.Int64() != 8 {
-		t.Fatalf("b: expected 8, got %d", b.Int64())
-	}
+	eventually(t, pollTimeout, func() bool {
+		return a.Int64() == 8 && b.Int64() == 8
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -264,12 +289,9 @@ func TestPNCounter_TwoNodeSync(t *testing.T) {
 	a.Increment(ctx, 10)
 	b.Decrement(ctx, 3)
 
-	if a.Int64() != 7 {
-		t.Fatalf("a: expected 7, got %d", a.Int64())
-	}
-	if b.Int64() != 7 {
-		t.Fatalf("b: expected 7, got %d", b.Int64())
-	}
+	eventually(t, pollTimeout, func() bool {
+		return a.Int64() == 7 && b.Int64() == 7
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -283,10 +305,10 @@ func TestLWWRegister_TwoNodeSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Set(ctx, "hello")
-	v, ok := b.Get()
-	if !ok || v != "hello" {
-		t.Fatalf("expected hello, got %q ok=%v", v, ok)
-	}
+	eventually(t, pollTimeout, func() bool {
+		v, ok := b.Get()
+		return ok && v == "hello"
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -300,13 +322,10 @@ func TestMVRegister_TwoNodeSync(t *testing.T) {
 	ctx := context.Background()
 
 	a.Write(ctx, "hello")
-	vals, err := b.Values()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(vals) != 1 || vals[0] != "hello" {
-		t.Fatalf("expected [hello], got %v", vals)
-	}
+	eventually(t, pollTimeout, func() bool {
+		vals, err := b.Values()
+		return err == nil && len(vals) == 1 && vals[0] == "hello"
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -352,14 +371,12 @@ func TestLWWMap_WriteConcern_WAll(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLWWMap_AntiEntropy(t *testing.T) {
-	// Node A writes locally (no transport).
 	a := NewLWWMap[string](1, StringCodec{})
 	ctx := context.Background()
 	a.Put(ctx, "key1", "val1")
 	a.Put(ctx, "key2", "val2")
 	a.Close()
 
-	// Now wire both nodes into a network.
 	net := newTestNet()
 	aeInterval := 50 * time.Millisecond
 	a2 := NewLWWMap[string](1, StringCodec{},
@@ -377,29 +394,20 @@ func TestLWWMap_AntiEntropy(t *testing.T) {
 	defer a2.Close()
 	defer b.Close()
 
-	// Re-apply a's state to a2 (simulating recovery from persistence).
 	a2.Put(ctx, "key1", "val1")
 	a2.Put(ctx, "key2", "val2")
 
-	// Wait for anti-entropy to sync.
-	time.Sleep(3 * aeInterval)
-
-	v, ok := b.Get("key1")
-	if !ok || v != "val1" {
-		t.Fatalf("expected val1, got %q ok=%v", v, ok)
-	}
-	v, ok = b.Get("key2")
-	if !ok || v != "val2" {
-		t.Fatalf("expected val2, got %q ok=%v", v, ok)
-	}
+	eventually(t, 3*time.Second, func() bool {
+		v1, ok1 := b.Get("key1")
+		v2, ok2 := b.Get("key2")
+		return ok1 && v1 == "val1" && ok2 && v2 == "val2"
+	})
 }
 
 func TestGCounter_AntiEntropy(t *testing.T) {
 	net := newTestNet()
 	aeInterval := 50 * time.Millisecond
 
-	// Create two counters. Node A increments, but we disable immediate
-	// propagation by adding the peer AFTER the mutation.
 	a := NewGCounter(1,
 		WithTransport(net.transport(1)),
 		WithTopology(net.topology(1)),
@@ -410,8 +418,6 @@ func TestGCounter_AntiEntropy(t *testing.T) {
 		WithTopology(net.topology(2)),
 		WithAntiEntropyInterval(aeInterval),
 	)
-	// Register peers AFTER creating nodes so OnReceive is wired,
-	// but topology is empty during A's increment.
 	net.addPeer(1)
 	net.addPeer(2)
 	defer a.Close()
@@ -420,10 +426,7 @@ func TestGCounter_AntiEntropy(t *testing.T) {
 	ctx := context.Background()
 	a.Increment(ctx, 42)
 
-	// Anti-entropy should sync the counter.
-	time.Sleep(3 * aeInterval)
-
-	if b.Int64() != 42 {
-		t.Fatalf("expected 42, got %d", b.Int64())
-	}
+	eventually(t, 3*time.Second, func() bool {
+		return b.Int64() == 42
+	})
 }
