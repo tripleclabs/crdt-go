@@ -1,12 +1,14 @@
 package crdt
 
+import "time"
+
 // Backend abstracts entry storage for collection CRDT types (ORSet, ORMap,
 // LWWMap, AWLWWMap, GList). The default in-memory implementation
-// is [MemoryBackend]. Providing a disk-backed implementation (e.g., backed
+// is [memoryBackend]. Providing a disk-backed implementation (e.g., backed
 // by bbolt) enables CRDTs whose entries are too large for memory.
 //
 // Values are split into two byte slices: value (user data, opaque) and meta
-// (CRDT metadata like dots, encoded via [EncodeDot]/[EncodeDotMap]). This
+// (CRDT metadata like dots, encoded via [encodeDot]/[encodeDotMap]). This
 // separation allows merge operations to compare metadata without
 // deserializing potentially large user values.
 //
@@ -57,7 +59,11 @@ type Backend interface {
 type Option func(*options)
 
 type options struct {
-	backend Backend
+	backend    Backend
+	transport  Transport
+	topology   TopologyProvider
+	concern    WriteConcern
+	aeInterval time.Duration
 }
 
 func applyOptions(opts []Option) options {
@@ -69,9 +75,27 @@ func applyOptions(opts []Option) options {
 }
 
 // WithBackend sets the [Backend] for a collection CRDT. If not provided,
-// the CRDT uses an in-memory [MemoryBackend].
+// the CRDT uses an in-memory [memoryBackend].
 func WithBackend(b Backend) Option {
 	return func(o *options) {
 		o.backend = b
 	}
+}
+
+// WithTransport sets the [Transport] for replication. If not provided,
+// the CRDT operates as a local-only data structure.
+func WithTransport(t Transport) Option {
+	return func(o *options) { o.transport = t }
+}
+
+// WithTopology sets the [TopologyProvider] for peer discovery.
+func WithTopology(t TopologyProvider) Option {
+	return func(o *options) { o.topology = t }
+}
+
+// WithAntiEntropyInterval sets how often the replica runs anti-entropy
+// sync with peers. Default is 1 second when a transport is configured.
+// Set to 0 to disable anti-entropy.
+func WithAntiEntropyInterval(d time.Duration) Option {
+	return func(o *options) { o.aeInterval = d }
 }

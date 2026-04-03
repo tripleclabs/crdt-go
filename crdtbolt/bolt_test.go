@@ -1,6 +1,7 @@
 package crdtbolt
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -178,68 +179,74 @@ func TestDecodeEntry_ShortData(t *testing.T) {
 	}
 }
 
-// --- Integration: use BoltBackend with Replica types ---
+// --- Integration: use BoltBackend with user-facing CRDT types ---
 
 func TestBoltBackend_WithLWWMap(t *testing.T) {
 	b := tempDB(t)
-	r := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	r := crdt.NewLWWMap[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	ctx := context.Background()
 
-	r.Data.Put("name", "alice", r.NextDot())
-	r.Data.Put("age", "30", r.NextDot())
+	r.Put(ctx, "name", "alice")
+	r.Put(ctx, "age", "30")
 
-	v, _, ok := r.Data.Get("name")
+	v, ok := r.Get("name")
 	if !ok || v != "alice" {
 		t.Fatalf("expected alice, got %v", v)
 	}
-	if r.Data.Len() != 2 {
-		t.Fatalf("expected 2, got %d", r.Data.Len())
+	if r.Len() != 2 {
+		t.Fatalf("expected 2, got %d", r.Len())
 	}
 }
 
 func TestBoltBackend_WithLWWMap_Convergence(t *testing.T) {
 	ba := tempDB(t)
 	bb := tempDB(t)
+	net := newTestNet()
 
-	a := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(ba))
-	b := crdt.NewLWWMapReplica[string](2, crdt.StringCodec{}, crdt.WithBackend(bb))
+	a := crdt.NewLWWMap[string](1, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(1)), crdt.WithTopology(net.topology(1)), crdt.WithBackend(ba))
+	b := crdt.NewLWWMap[string](2, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(2)), crdt.WithTopology(net.topology(2)), crdt.WithBackend(bb))
+	net.addPeer(1)
+	net.addPeer(2)
+	ctx := context.Background()
 
-	da, _ := a.Data.Put("from-a", "a-val", a.NextDot())
-	db, _ := b.Data.Put("from-b", "b-val", b.NextDot())
+	a.Put(ctx, "from-a", "a-val")
+	b.Put(ctx, "from-b", "b-val")
 
-	a.ApplyDelta(db)
-	b.ApplyDelta(da)
-
-	if a.Data.Len() != 2 || b.Data.Len() != 2 {
-		t.Fatalf("expected both 2, got a=%d b=%d", a.Data.Len(), b.Data.Len())
+	if a.Len() != 2 || b.Len() != 2 {
+		t.Fatalf("expected both 2, got a=%d b=%d", a.Len(), b.Len())
 	}
 }
 
 func TestBoltBackend_WithORSet(t *testing.T) {
 	b := tempDB(t)
-	r := crdt.NewORSetReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	r := crdt.NewORSet[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	ctx := context.Background()
 
-	r.Data.Add("alice", r.NextDot())
-	r.Data.Add("bob", r.NextDot())
+	r.Add(ctx, "alice")
+	r.Add(ctx, "bob")
 
-	if !r.Data.Contains("alice") || !r.Data.Contains("bob") {
+	if !r.Contains("alice") || !r.Contains("bob") {
 		t.Fatal("expected both elements")
 	}
-	if r.Data.Len() != 2 {
-		t.Fatalf("expected 2, got %d", r.Data.Len())
+	if r.Len() != 2 {
+		t.Fatalf("expected 2, got %d", r.Len())
 	}
 
-	r.Data.Remove("alice", r.HWM())
-	if r.Data.Contains("alice") {
+	r.Remove(ctx, "alice")
+	if r.Contains("alice") {
 		t.Fatal("alice should be removed")
 	}
 }
 
 func TestBoltBackend_WithORMap(t *testing.T) {
-	b := tempDB(t)
-	r := crdt.NewORMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	db := tempDB(t)
+	r := crdt.NewORMap[string](1, crdt.StringCodec{}, crdt.WithBackend(db))
+	ctx := context.Background()
 
-	r.Data.Put("key", "value", r.NextDot())
-	v, _, ok := r.Data.Get("key")
+	r.Put(ctx, "key", "value")
+	v, ok := r.Get("key")
 	if !ok || v != "value" {
 		t.Fatalf("expected value, got %v", v)
 	}
@@ -247,12 +254,13 @@ func TestBoltBackend_WithORMap(t *testing.T) {
 
 func TestBoltBackend_WithGList(t *testing.T) {
 	b := tempDB(t)
-	r := crdt.NewGListReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	r := crdt.NewGList[string](1, crdt.StringCodec{}, crdt.WithBackend(b))
+	ctx := context.Background()
 
-	r.Data.Append("first", r.NextDot())
-	r.Data.Append("second", r.NextDot())
+	r.Append(ctx, "first")
+	r.Append(ctx, "second")
 
-	items, err := r.Data.Items()
+	items, err := r.Items()
 	if err != nil {
 		t.Fatal(err)
 	}

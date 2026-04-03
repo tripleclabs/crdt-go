@@ -47,7 +47,7 @@ func TestInt64Codec(t *testing.T) {
 func TestInt64Codec_ShortBuffer(t *testing.T) {
 	c := Int64Codec{}
 	_, err := c.Decode([]byte{1, 2})
-	if err != ErrShortBuffer {
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestUint64Codec_Max(t *testing.T) {
 func TestUint64Codec_ShortBuffer(t *testing.T) {
 	c := Uint64Codec{}
 	_, err := c.Decode([]byte{1})
-	if err != ErrShortBuffer {
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 }

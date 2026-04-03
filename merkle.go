@@ -5,31 +5,31 @@ import (
 	"sort"
 )
 
-// MerkleMap is a hash-based structure for efficient equality checking and
+// merkleMap is a hash-based structure for efficient equality checking and
 // partial diff computation on key-value data. It maintains a root hash that
 // is updated lazily when entries change, enabling O(1) equality checks between
 // two MerkleMaps (useful for sync protocols to detect divergence without
 // comparing full state).
 //
 // The zero value is ready to use.
-type MerkleMap struct {
+type merkleMap struct {
 	entries map[string][]byte
 	hash    uint64
 	dirty   bool
 	seed    maphash.Seed
 }
 
-// NewMerkleMap returns an initialized MerkleMap.
-func NewMerkleMap() *MerkleMap {
-	return &MerkleMap{
+// newMerkleMap returns an initialized MerkleMap.
+func newMerkleMap() *merkleMap {
+	return &merkleMap{
 		entries: make(map[string][]byte),
 		seed:    maphash.MakeSeed(),
 	}
 }
 
 // Put stores a value under key. The root hash is marked dirty and will be
-// recomputed on the next call to [MerkleMap.Hash].
-func (mm *MerkleMap) Put(key string, value []byte) {
+// recomputed on the next call to [merkleMap.Hash].
+func (mm *merkleMap) Put(key string, value []byte) {
 	if mm.entries == nil {
 		mm.entries = make(map[string][]byte)
 		mm.seed = maphash.MakeSeed()
@@ -39,7 +39,7 @@ func (mm *MerkleMap) Put(key string, value []byte) {
 }
 
 // Delete removes the entry for key. The root hash is marked dirty.
-func (mm *MerkleMap) Delete(key string) {
+func (mm *merkleMap) Delete(key string) {
 	if mm.entries == nil {
 		return
 	}
@@ -48,7 +48,7 @@ func (mm *MerkleMap) Delete(key string) {
 }
 
 // Get retrieves the value for key.
-func (mm *MerkleMap) Get(key string) ([]byte, bool) {
+func (mm *merkleMap) Get(key string) ([]byte, bool) {
 	if mm.entries == nil {
 		return nil, false
 	}
@@ -57,14 +57,14 @@ func (mm *MerkleMap) Get(key string) ([]byte, bool) {
 }
 
 // Len returns the number of entries.
-func (mm *MerkleMap) Len() int {
+func (mm *merkleMap) Len() int {
 	return len(mm.entries)
 }
 
 // Hash returns the root hash of the MerkleMap. If the map has been modified
 // since the last call, the hash is recomputed. Two MerkleMaps with identical
 // entries produce the same hash (order-independent).
-func (mm *MerkleMap) Hash() uint64 {
+func (mm *merkleMap) Hash() uint64 {
 	if mm.dirty || mm.hash == 0 {
 		mm.recomputeHash()
 		mm.dirty = false
@@ -75,7 +75,7 @@ func (mm *MerkleMap) Hash() uint64 {
 // Equal reports whether mm and other contain exactly the same entries.
 // This first compares hashes for a fast inequality check, then falls back
 // to element-wise comparison only if hashes match.
-func (mm *MerkleMap) Equal(other *MerkleMap) bool {
+func (mm *merkleMap) Equal(other *merkleMap) bool {
 	if mm.Len() != other.Len() {
 		return false
 	}
@@ -97,7 +97,7 @@ func (mm *MerkleMap) Equal(other *MerkleMap) bool {
 
 // DivergentKeys returns the keys that differ between mm and other. This is
 // useful for sync protocols that need to identify which entries to exchange.
-func (mm *MerkleMap) DivergentKeys(other *MerkleMap) []string {
+func (mm *merkleMap) DivergentKeys(other *merkleMap) []string {
 	var divergent []string
 
 	// Keys in mm but not in other, or with different values.
@@ -118,7 +118,7 @@ func (mm *MerkleMap) DivergentKeys(other *MerkleMap) []string {
 }
 
 // recomputeHash computes an order-independent hash by XORing per-entry hashes.
-func (mm *MerkleMap) recomputeHash() {
+func (mm *merkleMap) recomputeHash() {
 	var h maphash.Hash
 	h.SetSeed(mm.seed)
 	var fp uint64

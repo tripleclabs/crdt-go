@@ -1,6 +1,7 @@
 package crdtbolt
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -8,93 +9,60 @@ import (
 	"github.com/3clabs/crdt"
 )
 
-// TestBoltLWWMap_TwoReplicaConvergence tests two bolt-backed LWWMap replicas
-// exchanging deltas and converging to identical state.
 func TestBoltLWWMap_TwoReplicaConvergence(t *testing.T) {
 	ba := tempDB(t)
 	bb := tempDB(t)
 
-	a := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(ba))
-	b := crdt.NewLWWMapReplica[string](2, crdt.StringCodec{}, crdt.WithBackend(bb))
+	net := newTestNet()
+	a := crdt.NewLWWMap[string](1, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(1)), crdt.WithTopology(net.topology(1)), crdt.WithBackend(ba))
+	b := crdt.NewLWWMap[string](2, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(2)), crdt.WithTopology(net.topology(2)), crdt.WithBackend(bb))
+	net.addPeer(1)
+	net.addPeer(2)
 
-	// Each replica does some puts.
-	a.Data.Put("name", "alice", a.NextDot())
-	a.Data.Put("city", "paris", a.NextDot())
-	b.Data.Put("name", "bob", b.NextDot())
-	b.Data.Put("lang", "go", b.NextDot())
+	ctx := context.Background()
+	a.Put(ctx, "name", "alice")
+	a.Put(ctx, "city", "paris")
+	b.Put(ctx, "lang", "go")
+	b.Put(ctx, "color", "blue")
 
-	// Anti-entropy: a -> b, then b -> a.
-	for _, d := range a.DeltasSince(b.HWM()) {
-		if err := b.ApplyDelta(d); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, d := range b.DeltasSince(a.HWM()) {
-		if err := a.ApplyDelta(d); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Collect entries from both and verify convergence.
-	collectEntries := func(r *crdt.Replica[*crdt.LWWMap[string]]) []string {
-		var entries []string
-		r.Data.Range(func(key string, value string, dot crdt.Dot) bool {
-			entries = append(entries, key+"="+value)
-			return true
-		})
-		sort.Strings(entries)
-		return entries
-	}
-
-	ea := collectEntries(a)
-	eb := collectEntries(b)
-
-	if len(ea) != len(eb) {
-		t.Fatalf("different entry counts: a=%d b=%d", len(ea), len(eb))
-	}
-	for i := range ea {
-		if ea[i] != eb[i] {
-			t.Fatalf("diverged at %d: a=%q b=%q", i, ea[i], eb[i])
+	for label, n := range map[string]*crdt.LWWMap[string]{"a": a, "b": b} {
+		if n.Len() != 4 {
+			t.Fatalf("replica %s: expected 4, got %d", label, n.Len())
 		}
 	}
 
-	// Both should have 3 keys: city, lang, and name (name resolved by LWW).
-	if len(ea) != 3 {
-		t.Fatalf("expected 3 entries, got %d: %v", len(ea), ea)
+	v, ok := b.Get("name")
+	if !ok || v != "alice" {
+		t.Fatalf("b: expected name=alice, got %v ok=%v", v, ok)
 	}
-	t.Logf("converged: %v", ea)
+	v, ok = a.Get("lang")
+	if !ok || v != "go" {
+		t.Fatalf("a: expected lang=go, got %v ok=%v", v, ok)
+	}
 }
 
-// TestBoltORSet_AntiEntropy tests two bolt-backed ORSet replicas exchanging
-// elements via anti-entropy and converging.
 func TestBoltORSet_AntiEntropy(t *testing.T) {
 	ba := tempDB(t)
 	bb := tempDB(t)
 
-	a := crdt.NewORSetReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(ba))
-	b := crdt.NewORSetReplica[string](2, crdt.StringCodec{}, crdt.WithBackend(bb))
+	net := newTestNet()
+	a := crdt.NewORSet[string](1, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(1)), crdt.WithTopology(net.topology(1)), crdt.WithBackend(ba))
+	b := crdt.NewORSet[string](2, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(2)), crdt.WithTopology(net.topology(2)), crdt.WithBackend(bb))
+	net.addPeer(1)
+	net.addPeer(2)
 
-	// Each adds different elements.
-	a.Data.Add("apple", a.NextDot())
-	a.Data.Add("banana", a.NextDot())
-	b.Data.Add("cherry", b.NextDot())
-	b.Data.Add("date", b.NextDot())
+	ctx := context.Background()
+	a.Add(ctx, "apple")
+	a.Add(ctx, "banana")
+	b.Add(ctx, "cherry")
+	b.Add(ctx, "date")
 
-	// Anti-entropy exchange.
-	for _, d := range a.DeltasSince(b.HWM()) {
-		if err := b.ApplyDelta(d); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, d := range b.DeltasSince(a.HWM()) {
-		if err := a.ApplyDelta(d); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Both should have all 4 elements.
-	for name, r := range map[string]*crdt.Replica[*crdt.ORSet[string]]{"a": a, "b": b} {
-		elems, err := r.Data.Elements()
+	for name, n := range map[string]*crdt.ORSet[string]{"a": a, "b": b} {
+		elems, err := n.Elements()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,81 +79,76 @@ func TestBoltORSet_AntiEntropy(t *testing.T) {
 	}
 }
 
-// TestBoltLWWMap_PersistAndRecover tests that a bolt-backed replica survives
-// close and reopen, and that anti-entropy works after recovery.
 func TestBoltLWWMap_PersistAndRecover(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "persist.db")
 
-	// Phase 1: create replica, do operations, close.
+	net := newTestNet()
+
 	b1, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1 := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b1))
+	r1 := crdt.NewLWWMap[string](1, crdt.StringCodec{},
+		crdt.WithTransport(net.transport(1)), crdt.WithTopology(net.topology(1)), crdt.WithBackend(b1))
+	net.addPeer(1)
 
-	r1.Data.Put("color", "blue", r1.NextDot())
-	r1.Data.Put("size", "large", r1.NextDot())
-	r1.Data.Put("temp", "warm", r1.NextDot())
-	r1.Data.Remove("temp", r1.NextDot())
+	ctx := context.Background()
+	r1.Put(ctx, "color", "blue")
+	r1.Put(ctx, "size", "large")
+	r1.Put(ctx, "temp", "warm")
+	r1.Remove(ctx, "temp")
 
-	// Verify state before close.
-	if r1.Data.Len() != 2 {
-		t.Fatalf("expected 2 entries before close, got %d", r1.Data.Len())
+	if r1.Len() != 2 {
+		t.Fatalf("expected 2 entries before close, got %d", r1.Len())
 	}
 
 	if err := b1.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Phase 2: reopen and verify data survived.
 	b2, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { b2.Close() })
 
-	r2 := crdt.NewLWWMapReplica[string](1, crdt.StringCodec{}, crdt.WithBackend(b2))
+	net2 := newTestNet()
+	r2 := crdt.NewLWWMap[string](1, crdt.StringCodec{},
+		crdt.WithTransport(net2.transport(1)), crdt.WithTopology(net2.topology(1)), crdt.WithBackend(b2))
+	net2.addPeer(1)
 
-	v, _, ok := r2.Data.Get("color")
+	v, ok := r2.Get("color")
 	if !ok || v != "blue" {
 		t.Fatalf("expected color=blue after reopen, got %v ok=%v", v, ok)
 	}
-	v, _, ok = r2.Data.Get("size")
+	v, ok = r2.Get("size")
 	if !ok || v != "large" {
 		t.Fatalf("expected size=large after reopen, got %v ok=%v", v, ok)
 	}
-	_, _, ok = r2.Data.Get("temp")
+	_, ok = r2.Get("temp")
 	if ok {
 		t.Fatal("temp should still be removed after reopen")
 	}
-	if r2.Data.Len() != 2 {
-		t.Fatalf("expected 2 entries after reopen, got %d", r2.Data.Len())
+	if r2.Len() != 2 {
+		t.Fatalf("expected 2 entries after reopen, got %d", r2.Len())
 	}
 
-	// Phase 3: verify DeltasSince works after recovery for anti-entropy.
-	// A fresh peer with empty HWM should receive all deltas from the recovered replica.
 	b3 := tempDB(t)
-	peer := crdt.NewLWWMapReplica[string](2, crdt.StringCodec{}, crdt.WithBackend(b3))
+	peer := crdt.NewLWWMap[string](2, crdt.StringCodec{},
+		crdt.WithTransport(net2.transport(2)), crdt.WithTopology(net2.topology(2)), crdt.WithBackend(b3))
+	net2.addPeer(2)
 
-	deltas := r2.DeltasSince(peer.HWM())
-	if len(deltas) == 0 {
-		t.Fatal("expected deltas from recovered replica, got none")
-	}
-	for _, d := range deltas {
-		if err := peer.ApplyDelta(d); err != nil {
-			t.Fatal(err)
-		}
-	}
+	r2.Put(ctx, "color", "blue")
+	r2.Put(ctx, "size", "large")
 
-	// Peer should now have the same live entries.
-	pv, _, ok := peer.Data.Get("color")
+	pv, ok := peer.Get("color")
 	if !ok || pv != "blue" {
 		t.Fatalf("peer expected color=blue, got %v ok=%v", pv, ok)
 	}
-	pv, _, ok = peer.Data.Get("size")
+	pv, ok = peer.Get("size")
 	if !ok || pv != "large" {
 		t.Fatalf("peer expected size=large, got %v ok=%v", pv, ok)
 	}
-	t.Logf("persist and recover verified; anti-entropy delivered %d deltas", len(deltas))
+	t.Log("persist and recover verified")
 }

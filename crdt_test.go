@@ -8,7 +8,7 @@ import (
 // --- GCounter ---
 
 func TestGCounter_SetGet(t *testing.T) {
-	c := NewGCounter()
+	c := newGCounterState()
 	c.Set(1, 10)
 	c.Set(2, 20)
 	if c.Get(1) != 10 || c.Get(2) != 20 || c.Get(99) != 0 {
@@ -23,7 +23,7 @@ func TestGCounter_SetGet(t *testing.T) {
 }
 
 func TestGCounter_Range(t *testing.T) {
-	c := NewGCounter()
+	c := newGCounterState()
 	c.Set(1, 5)
 	c.Set(2, 3)
 	sum := uint64(0)
@@ -36,7 +36,7 @@ func TestGCounter_Range(t *testing.T) {
 // --- PNCounter ---
 
 func TestPNCounter_SetGet(t *testing.T) {
-	c := NewPNCounter()
+	c := newPNCounterState()
 	c.SetPositive(1, 10)
 	c.SetNegative(1, 3)
 	if c.GetPositive(1) != 10 || c.GetNegative(1) != 3 {
@@ -48,7 +48,7 @@ func TestPNCounter_SetGet(t *testing.T) {
 }
 
 func TestPNCounter_Range(t *testing.T) {
-	c := NewPNCounter()
+	c := newPNCounterState()
 	c.SetPositive(1, 5)
 	c.SetNegative(2, 3)
 	var posCount, negCount int
@@ -62,7 +62,7 @@ func TestPNCounter_Range(t *testing.T) {
 // --- LWWRegister ---
 
 func TestLWWRegister_SetGet(t *testing.T) {
-	r := NewLWWRegister(StringCodec{})
+	r := newLWWRegisterState(StringCodec{})
 	r.Set("hello", Dot{1, 1})
 	v, dot, ok := r.Get()
 	if !ok || v != "hello" || dot != (Dot{1, 1}) {
@@ -71,7 +71,7 @@ func TestLWWRegister_SetGet(t *testing.T) {
 }
 
 func TestLWWRegister_SetBytes(t *testing.T) {
-	r := NewLWWRegister(StringCodec{})
+	r := newLWWRegisterState(StringCodec{})
 	r.SetBytes([]byte("hi"), Dot{2, 3})
 	b, dot, ok := r.GetBytes()
 	if !ok || string(b) != "hi" || dot != (Dot{2, 3}) {
@@ -80,7 +80,7 @@ func TestLWWRegister_SetBytes(t *testing.T) {
 }
 
 func TestLWWRegister_Empty(t *testing.T) {
-	r := NewLWWRegister(StringCodec{})
+	r := newLWWRegisterState(StringCodec{})
 	_, _, ok := r.Get()
 	if ok {
 		t.Fatal("expected not set")
@@ -93,7 +93,7 @@ func TestLWWRegister_Empty(t *testing.T) {
 // --- MVRegister ---
 
 func TestMVRegister_SetValues(t *testing.T) {
-	r := NewMVRegister(StringCodec{})
+	r := newMVRegisterState(StringCodec{})
 	r.Set("hello", Dot{1, 1})
 	vals, _ := r.Values()
 	if len(vals) != 1 || vals[0] != "hello" {
@@ -102,7 +102,7 @@ func TestMVRegister_SetValues(t *testing.T) {
 }
 
 func TestMVRegister_SetEntries(t *testing.T) {
-	r := NewMVRegister(StringCodec{})
+	r := newMVRegisterState(StringCodec{})
 	r.SetEntries([]struct {
 		ValBytes []byte
 		Dot      Dot
@@ -116,7 +116,7 @@ func TestMVRegister_SetEntries(t *testing.T) {
 }
 
 func TestMVRegister_RangeEntries(t *testing.T) {
-	r := NewMVRegister(StringCodec{})
+	r := newMVRegisterState(StringCodec{})
 	r.Set("x", Dot{1, 1})
 	count := 0
 	r.RangeEntries(func(_ []byte, _ Dot) bool { count++; return true })
@@ -128,7 +128,7 @@ func TestMVRegister_RangeEntries(t *testing.T) {
 // --- LWWMap ---
 
 func TestLWWMap_PutGet(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.Put("name", "alice", Dot{1, 1})
 	v, dot, ok := m.Get("name")
 	if !ok || v != "alice" || dot != (Dot{1, 1}) {
@@ -140,7 +140,7 @@ func TestLWWMap_PutGet(t *testing.T) {
 }
 
 func TestLWWMap_PutBytes(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.PutBytes("k", []byte("val"), Dot{1, 1})
 	b, dot, ok := m.GetBytes("k")
 	if !ok || string(b) != "val" || dot != (Dot{1, 1}) {
@@ -149,7 +149,7 @@ func TestLWWMap_PutBytes(t *testing.T) {
 }
 
 func TestLWWMap_Remove(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	m.Remove("k", Dot{1, 2})
 	_, _, ok := m.Get("k")
@@ -166,7 +166,7 @@ func TestLWWMap_Remove(t *testing.T) {
 }
 
 func TestLWWMap_Range(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.Put("a", "1", Dot{1, 1})
 	m.Put("b", "2", Dot{1, 2})
 	var keys []string
@@ -178,7 +178,7 @@ func TestLWWMap_Range(t *testing.T) {
 }
 
 func TestLWWMap_RangeTombstones(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	m.Remove("k", Dot{1, 2})
 	count := 0
@@ -191,7 +191,7 @@ func TestLWWMap_RangeTombstones(t *testing.T) {
 // --- ORSet ---
 
 func TestORSet_PutContains(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.Put("alice", DotMap{1: 1})
 	if !s.Contains("alice") {
 		t.Fatal("should contain alice")
@@ -202,7 +202,7 @@ func TestORSet_PutContains(t *testing.T) {
 }
 
 func TestORSet_Remove(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.Put("alice", DotMap{1: 1})
 	s.Remove("alice", VClock{})
 	if s.Contains("alice") {
@@ -211,7 +211,7 @@ func TestORSet_Remove(t *testing.T) {
 }
 
 func TestORSet_GetDotMap(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.Put("x", DotMap{1: 1, 2: 3})
 	dm, ok := s.Get("x")
 	if !ok || dm[1] != 1 || dm[2] != 3 {
@@ -220,7 +220,7 @@ func TestORSet_GetDotMap(t *testing.T) {
 }
 
 func TestORSet_Elements(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.Put("b", DotMap{1: 1})
 	s.Put("a", DotMap{1: 2})
 	elems, _ := s.Elements()
@@ -231,7 +231,7 @@ func TestORSet_Elements(t *testing.T) {
 }
 
 func TestORSet_Range(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.Put("x", DotMap{1: 1})
 	count := 0
 	s.Range(func(_ string, _ DotMap) bool { count++; return true })
@@ -243,7 +243,7 @@ func TestORSet_Range(t *testing.T) {
 // --- ORMap ---
 
 func TestORMap_PutGet(t *testing.T) {
-	m := NewORMap(StringCodec{})
+	m := newORMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	v, dm, ok := m.Get("k")
 	if !ok || v != "val" || dm[1] != 1 {
@@ -252,7 +252,7 @@ func TestORMap_PutGet(t *testing.T) {
 }
 
 func TestORMap_Remove(t *testing.T) {
-	m := NewORMap(StringCodec{})
+	m := newORMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	m.Remove("k", VClock{1: 1})
 	_, _, ok := m.Get("k")
@@ -262,7 +262,7 @@ func TestORMap_Remove(t *testing.T) {
 }
 
 func TestORMap_Range(t *testing.T) {
-	m := NewORMap(StringCodec{})
+	m := newORMapState(StringCodec{})
 	m.Put("a", "1", Dot{1, 1})
 	m.Put("b", "2", Dot{1, 2})
 	count := 0
@@ -275,7 +275,7 @@ func TestORMap_Range(t *testing.T) {
 // --- AWLWWMap ---
 
 func TestAWLWWMap_PutGet(t *testing.T) {
-	m := NewAWLWWMap(StringCodec{})
+	m := newAWLWWMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	v, dot, ok := m.Get("k")
 	if !ok || v != "val" || dot != (Dot{1, 1}) {
@@ -284,7 +284,7 @@ func TestAWLWWMap_PutGet(t *testing.T) {
 }
 
 func TestAWLWWMap_Remove(t *testing.T) {
-	m := NewAWLWWMap(StringCodec{})
+	m := newAWLWWMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	m.Remove("k", Dot{1, 2}, VClock{1: 1})
 	_, _, ok := m.Get("k")
@@ -300,7 +300,7 @@ func TestAWLWWMap_Remove(t *testing.T) {
 // --- GList ---
 
 func TestGList_Append(t *testing.T) {
-	l := NewGList(StringCodec{})
+	l := newGListState(StringCodec{})
 	l.Append("first", Dot{1, 1})
 	l.Append("second", Dot{1, 2})
 	items, _ := l.Items()
@@ -313,7 +313,7 @@ func TestGList_Append(t *testing.T) {
 }
 
 func TestGList_Has(t *testing.T) {
-	l := NewGList(StringCodec{})
+	l := newGListState(StringCodec{})
 	l.Append("x", Dot{1, 1})
 	if !l.Has(Dot{1, 1}) {
 		t.Fatal("should have dot {1,1}")
@@ -324,7 +324,7 @@ func TestGList_Has(t *testing.T) {
 }
 
 func TestGList_CausalOrder(t *testing.T) {
-	l := NewGList(StringCodec{})
+	l := newGListState(StringCodec{})
 	l.Append("b1", Dot{2, 1})
 	l.Append("a1", Dot{1, 1})
 	items, _ := l.Items()
@@ -334,7 +334,7 @@ func TestGList_CausalOrder(t *testing.T) {
 }
 
 func TestGList_AppendBytes(t *testing.T) {
-	l := NewGList(StringCodec{})
+	l := newGListState(StringCodec{})
 	l.AppendBytes([]byte("raw"), Dot{1, 1})
 	if l.Len() != 1 {
 		t.Fatal("expected 1")
@@ -344,7 +344,7 @@ func TestGList_AppendBytes(t *testing.T) {
 // --- AWLWWMap additional ---
 
 func TestAWLWWMap_PutBytes(t *testing.T) {
-	m := NewAWLWWMap(StringCodec{})
+	m := newAWLWWMapState(StringCodec{})
 	m.PutBytes("k", []byte("val"), Dot{1, 1})
 	b, dot, ok := m.GetBytes("k")
 	if !ok || string(b) != "val" || dot != (Dot{1, 1}) {
@@ -353,7 +353,7 @@ func TestAWLWWMap_PutBytes(t *testing.T) {
 }
 
 func TestAWLWWMap_Range(t *testing.T) {
-	m := NewAWLWWMap(StringCodec{})
+	m := newAWLWWMapState(StringCodec{})
 	m.Put("a", "1", Dot{1, 1})
 	m.Put("b", "2", Dot{1, 2})
 	count := 0
@@ -367,7 +367,7 @@ func TestAWLWWMap_Range(t *testing.T) {
 }
 
 func TestAWLWWMap_RangeTombstones(t *testing.T) {
-	m := NewAWLWWMap(StringCodec{})
+	m := newAWLWWMapState(StringCodec{})
 	m.Put("k", "val", Dot{1, 1})
 	m.Remove("k", Dot{1, 2}, VClock{1: 1})
 	count := 0
@@ -380,7 +380,7 @@ func TestAWLWWMap_RangeTombstones(t *testing.T) {
 // --- ORMap additional ---
 
 func TestORMap_PutBytesGetBytes(t *testing.T) {
-	m := NewORMap(StringCodec{})
+	m := newORMapState(StringCodec{})
 	m.PutBytes("k", []byte("val"), DotMap{1: 1})
 	b, dm, ok := m.GetBytes("k")
 	if !ok || string(b) != "val" || dm[1] != 1 {
@@ -392,7 +392,7 @@ func TestORMap_PutBytesGetBytes(t *testing.T) {
 }
 
 func TestORMap_RangeBytes(t *testing.T) {
-	m := NewORMap(StringCodec{})
+	m := newORMapState(StringCodec{})
 	m.PutBytes("k", []byte("v"), DotMap{1: 1})
 	count := 0
 	m.RangeBytes(func(_ string, _ []byte, _ DotMap) bool { count++; return true })
@@ -404,7 +404,7 @@ func TestORMap_RangeBytes(t *testing.T) {
 // --- ORSet additional ---
 
 func TestORSet_EncodedOps(t *testing.T) {
-	s := NewORSet(StringCodec{})
+	s := newORSetState(StringCodec{})
 	s.PutEncoded("alice", DotMap{1: 1})
 	dm, ok := s.GetEncoded("alice")
 	if !ok || dm[1] != 1 {
@@ -419,7 +419,7 @@ func TestORSet_EncodedOps(t *testing.T) {
 // --- LWWMap additional ---
 
 func TestLWWMap_RangeBytes(t *testing.T) {
-	m := NewLWWMap(StringCodec{})
+	m := newLWWMapState(StringCodec{})
 	m.PutBytes("k", []byte("v"), Dot{1, 1})
 	count := 0
 	m.RangeBytes(func(_ string, _ []byte, _ Dot) bool { count++; return true })
@@ -431,8 +431,8 @@ func TestLWWMap_RangeBytes(t *testing.T) {
 // --- WithBackend ---
 
 func TestWithBackend(t *testing.T) {
-	b := NewMemoryBackend()
-	m := NewLWWMap(StringCodec{}, WithBackend(b))
+	b := newMemoryBackend()
+	m := newLWWMapState(StringCodec{}, WithBackend(b))
 	m.Put("k", "v", Dot{1, 1})
 	// Verify it used the provided backend.
 	_, _, ok := b.GetEntry("k")
@@ -442,7 +442,7 @@ func TestWithBackend(t *testing.T) {
 }
 
 func TestGList_Range(t *testing.T) {
-	l := NewGList(StringCodec{})
+	l := newGListState(StringCodec{})
 	l.Append("x", Dot{1, 1})
 	count := 0
 	l.Range(func(_ []byte, _ Dot) bool { count++; return true })

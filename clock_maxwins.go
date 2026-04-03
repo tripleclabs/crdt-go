@@ -2,15 +2,15 @@ package crdt
 
 import "encoding/binary"
 
-// MaxWinsClock implements [Clock] with max-wins semantics. A remote delta
+// maxWinsClock implements [clock] with max-wins semantics. A remote delta
 // is allowed if its count (encoded as 8 bytes big-endian in Meta) exceeds
 // the local count for the same key. If no local state exists, the delta is
 // always allowed.
 //
 // Used by: GCounter, PNCounter.
-type MaxWinsClock struct{}
+type maxWinsClock struct{}
 
-func (MaxWinsClock) Allows(local Queryable, info DeltaInfo) bool {
+func (maxWinsClock) Allows(local queryable, info deltaInfo) bool {
 	if len(info.Meta) < 8 {
 		return false
 	}

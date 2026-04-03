@@ -1,12 +1,12 @@
 package crdt
 
-// AlwaysMergeClock implements [Clock] by always allowing the delta. All
+// alwaysMergeClock implements [clock] by always allowing the delta. All
 // merge logic (dotmap combination, context-based pruning, dedup) is handled
-// by the storage type's [Mergeable.Apply] method.
+// by the storage type's [mergeable.Apply] method.
 //
 // Used by: ORSet, ORMap, MVRegister, GList.
-type AlwaysMergeClock struct{}
+type alwaysMergeClock struct{}
 
-func (AlwaysMergeClock) Allows(Queryable, DeltaInfo) bool {
+func (alwaysMergeClock) Allows(queryable, deltaInfo) bool {
 	return true
 }

@@ -3,7 +3,7 @@ package crdt
 import "testing"
 
 func TestNewVClock(t *testing.T) {
-	vc := NewVClock()
+	vc := newVClock()
 	if len(vc) != 0 {
 		t.Fatal("expected empty vclock")
 	}

@@ -1,8 +1,8 @@
 package crdt
 
-// MemoryBackend is the default in-memory [Backend] backed by Go maps.
+// memoryBackend is the default in-memory [Backend] backed by Go maps.
 // All operations mutate in place. The zero value is ready to use.
-type MemoryBackend struct {
+type memoryBackend struct {
 	entries    map[string]memEntry
 	tombstones map[string][]byte
 }
@@ -12,16 +12,16 @@ type memEntry struct {
 	meta  []byte
 }
 
-// NewMemoryBackend returns an initialized [MemoryBackend].
-func NewMemoryBackend() *MemoryBackend {
-	return &MemoryBackend{
+// newMemoryBackend returns an initialized [memoryBackend].
+func newMemoryBackend() *memoryBackend {
+	return &memoryBackend{
 		entries:    make(map[string]memEntry),
 		tombstones: make(map[string][]byte),
 	}
 }
 
 // GetEntry retrieves the value and metadata for key.
-func (m *MemoryBackend) GetEntry(key string) ([]byte, []byte, bool) {
+func (m *memoryBackend) GetEntry(key string) ([]byte, []byte, bool) {
 	if m.entries == nil {
 		return nil, nil, false
 	}
@@ -33,7 +33,7 @@ func (m *MemoryBackend) GetEntry(key string) ([]byte, []byte, bool) {
 }
 
 // PutEntry stores value and metadata under key.
-func (m *MemoryBackend) PutEntry(key string, value []byte, meta []byte) {
+func (m *memoryBackend) PutEntry(key string, value []byte, meta []byte) {
 	if m.entries == nil {
 		m.entries = make(map[string]memEntry)
 	}
@@ -41,7 +41,7 @@ func (m *MemoryBackend) PutEntry(key string, value []byte, meta []byte) {
 }
 
 // DeleteEntry removes the entry for key.
-func (m *MemoryBackend) DeleteEntry(key string) {
+func (m *memoryBackend) DeleteEntry(key string) {
 	if m.entries == nil {
 		return
 	}
@@ -49,7 +49,7 @@ func (m *MemoryBackend) DeleteEntry(key string) {
 }
 
 // RangeEntries calls fn for each entry. If fn returns false, iteration stops.
-func (m *MemoryBackend) RangeEntries(fn func(key string, value []byte, meta []byte) bool) {
+func (m *memoryBackend) RangeEntries(fn func(key string, value []byte, meta []byte) bool) {
 	if m.entries == nil {
 		return
 	}
@@ -61,12 +61,12 @@ func (m *MemoryBackend) RangeEntries(fn func(key string, value []byte, meta []by
 }
 
 // EntryLen returns the number of entries.
-func (m *MemoryBackend) EntryLen() int {
+func (m *memoryBackend) EntryLen() int {
 	return len(m.entries)
 }
 
 // GetTombstone retrieves the metadata for a tombstoned key.
-func (m *MemoryBackend) GetTombstone(key string) ([]byte, bool) {
+func (m *memoryBackend) GetTombstone(key string) ([]byte, bool) {
 	if m.tombstones == nil {
 		return nil, false
 	}
@@ -75,7 +75,7 @@ func (m *MemoryBackend) GetTombstone(key string) ([]byte, bool) {
 }
 
 // PutTombstone stores tombstone metadata under key.
-func (m *MemoryBackend) PutTombstone(key string, meta []byte) {
+func (m *memoryBackend) PutTombstone(key string, meta []byte) {
 	if m.tombstones == nil {
 		m.tombstones = make(map[string][]byte)
 	}
@@ -83,7 +83,7 @@ func (m *MemoryBackend) PutTombstone(key string, meta []byte) {
 }
 
 // DeleteTombstone removes the tombstone for key.
-func (m *MemoryBackend) DeleteTombstone(key string) {
+func (m *memoryBackend) DeleteTombstone(key string) {
 	if m.tombstones == nil {
 		return
 	}
@@ -91,7 +91,7 @@ func (m *MemoryBackend) DeleteTombstone(key string) {
 }
 
 // RangeTombstones calls fn for each tombstone.
-func (m *MemoryBackend) RangeTombstones(fn func(key string, meta []byte) bool) {
+func (m *memoryBackend) RangeTombstones(fn func(key string, meta []byte) bool) {
 	if m.tombstones == nil {
 		return
 	}
@@ -103,15 +103,6 @@ func (m *MemoryBackend) RangeTombstones(fn func(key string, meta []byte) bool) {
 }
 
 // TombstoneLen returns the number of tombstones.
-func (m *MemoryBackend) TombstoneLen() int {
+func (m *memoryBackend) TombstoneLen() int {
 	return len(m.tombstones)
-}
-
-func cloneBytes(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	c := make([]byte, len(b))
-	copy(c, b)
-	return c
 }

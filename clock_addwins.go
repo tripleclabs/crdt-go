@@ -1,6 +1,6 @@
 package crdt
 
-// AddWinsClock implements [Clock] with add-wins semantics. A concurrent put
+// addWinsClock implements [clock] with add-wins semantics. A concurrent put
 // beats a concurrent remove. Tombstones carry causal context (a [VClock])
 // so the clock can determine whether an entry's dot is "covered" by the
 // removal.
@@ -13,19 +13,19 @@ package crdt
 //   - Remove vs tombstone: LWW ([DotGT])
 //
 // Used by: AWLWWMap.
-type AddWinsClock struct{}
+type addWinsClock struct{}
 
-func (AddWinsClock) Allows(local Queryable, info DeltaInfo) bool {
-	remoteDot, err := DecodeDot(info.Meta)
+func (addWinsClock) Allows(local queryable, info deltaInfo) bool {
+	remoteDot, err := decodeDot(info.Meta)
 	if err != nil {
 		return false
 	}
 
 	switch info.Op {
-	case OpPut:
+	case opPut:
 		// Against existing entry: LWW.
 		if entryMeta, ok := local.EntryMeta(info.Key); ok {
-			localDot, err := DecodeDot(entryMeta)
+			localDot, err := decodeDot(entryMeta)
 			if err == nil && !DotGT(remoteDot, localDot) {
 				return false
 			}
@@ -36,7 +36,7 @@ func (AddWinsClock) Allows(local Queryable, info DeltaInfo) bool {
 		if tombMeta, ok := local.TombstoneMeta(info.Key); ok {
 			// AWLWWMap tombstone meta: [16-byte dot][encoded vclock].
 			if len(tombMeta) > 16 {
-				tombCtx, err := DecodeVClock(tombMeta[16:])
+				tombCtx, err := decodeVClock(tombMeta[16:])
 				if err == nil && tombCtx.Get(remoteDot.Replica) >= remoteDot.Counter {
 					return false
 				}
@@ -45,13 +45,13 @@ func (AddWinsClock) Allows(local Queryable, info DeltaInfo) bool {
 		}
 		return true
 
-	case OpRemove:
+	case opRemove:
 		// Against existing entry: add-wins — entry survives if its dot
 		// is NOT covered by the remote's context.
 		if entryMeta, ok := local.EntryMeta(info.Key); ok {
-			entryDot, err := DecodeDot(entryMeta)
+			entryDot, err := decodeDot(entryMeta)
 			if err == nil && info.Context != nil {
-				remoteCtx, err := DecodeVClock(info.Context)
+				remoteCtx, err := decodeVClock(info.Context)
 				if err == nil && remoteCtx.Get(entryDot.Replica) < entryDot.Counter {
 					return false // entry not covered, add wins
 				}
@@ -61,7 +61,7 @@ func (AddWinsClock) Allows(local Queryable, info DeltaInfo) bool {
 		}
 		// Against existing tombstone: LWW.
 		if tombMeta, ok := local.TombstoneMeta(info.Key); ok {
-			tombDot, err := DecodeDot(tombMeta)
+			tombDot, err := decodeDot(tombMeta)
 			if err == nil && !DotGT(remoteDot, tombDot) {
 				return false
 			}

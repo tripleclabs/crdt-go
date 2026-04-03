@@ -4,12 +4,12 @@ import "testing"
 
 func TestEncodeDot(t *testing.T) {
 	d := Dot{Replica: 42, Counter: 7}
-	b := EncodeDot(d)
+	b := encodeDot(d)
 	if len(b) != 16 {
 		t.Fatalf("expected 16 bytes, got %d", len(b))
 	}
 
-	d2, err := DecodeDot(b)
+	d2, err := decodeDot(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,17 +19,17 @@ func TestEncodeDot(t *testing.T) {
 }
 
 func TestDecodeDot_ShortBuffer(t *testing.T) {
-	_, err := DecodeDot([]byte{1, 2, 3})
-	if err != ErrShortBuffer {
+	_, err := decodeDot([]byte{1, 2, 3})
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 }
 
 func TestEncodeDotMap(t *testing.T) {
 	dm := DotMap{3: 10, 1: 20, 2: 30}
-	b := EncodeDotMap(dm)
+	b := encodeDotMap(dm)
 
-	dm2, err := DecodeDotMap(b)
+	dm2, err := decodeDotMap(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,12 +40,12 @@ func TestEncodeDotMap(t *testing.T) {
 
 func TestEncodeDotMap_Empty(t *testing.T) {
 	dm := DotMap{}
-	b := EncodeDotMap(dm)
+	b := encodeDotMap(dm)
 	if len(b) != 4 {
 		t.Fatalf("expected 4 bytes for empty, got %d", len(b))
 	}
 
-	dm2, err := DecodeDotMap(b)
+	dm2, err := decodeDotMap(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,22 +55,22 @@ func TestEncodeDotMap_Empty(t *testing.T) {
 }
 
 func TestDecodeDotMap_ShortBuffer(t *testing.T) {
-	_, err := DecodeDotMap([]byte{0, 0})
-	if err != ErrShortBuffer {
+	_, err := decodeDotMap([]byte{0, 0})
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 
 	// Count says 1 entry but no entry data.
-	_, err = DecodeDotMap([]byte{0, 0, 0, 1})
-	if err != ErrShortBuffer {
+	_, err = decodeDotMap([]byte{0, 0, 0, 1})
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 }
 
 func TestEncodeDotMap_Deterministic(t *testing.T) {
 	dm := DotMap{3: 10, 1: 20, 2: 30}
-	b1 := EncodeDotMap(dm)
-	b2 := EncodeDotMap(dm)
+	b1 := encodeDotMap(dm)
+	b2 := encodeDotMap(dm)
 	if string(b1) != string(b2) {
 		t.Fatal("encoding should be deterministic")
 	}
@@ -78,9 +78,9 @@ func TestEncodeDotMap_Deterministic(t *testing.T) {
 
 func TestEncodeVClock(t *testing.T) {
 	vc := VClock{1: 5, 2: 3}
-	b := EncodeVClock(vc)
+	b := encodeVClock(vc)
 
-	vc2, err := DecodeVClock(b)
+	vc2, err := decodeVClock(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestEncodeVClock(t *testing.T) {
 
 func TestEncodeVClock_Empty(t *testing.T) {
 	vc := VClock{}
-	b := EncodeVClock(vc)
-	vc2, err := DecodeVClock(b)
+	b := encodeVClock(vc)
+	vc2, err := decodeVClock(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +102,8 @@ func TestEncodeVClock_Empty(t *testing.T) {
 }
 
 func TestDecodeVClock_ShortBuffer(t *testing.T) {
-	_, err := DecodeVClock([]byte{})
-	if err != ErrShortBuffer {
+	_, err := decodeVClock([]byte{})
+	if err != errShortBuffer {
 		t.Fatalf("expected ErrShortBuffer, got %v", err)
 	}
 }
@@ -120,8 +120,8 @@ func TestSortedReplicaIDs(t *testing.T) {
 
 func TestEncodeDot_ZeroValues(t *testing.T) {
 	d := Dot{}
-	b := EncodeDot(d)
-	d2, err := DecodeDot(b)
+	b := encodeDot(d)
+	d2, err := decodeDot(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,8 +132,8 @@ func TestEncodeDot_ZeroValues(t *testing.T) {
 
 func TestEncodeDotMap_LargeValues(t *testing.T) {
 	dm := DotMap{^uint64(0): ^uint64(0)} // max uint64
-	b := EncodeDotMap(dm)
-	dm2, err := DecodeDotMap(b)
+	b := encodeDotMap(dm)
+	dm2, err := decodeDotMap(b)
 	if err != nil {
 		t.Fatal(err)
 	}

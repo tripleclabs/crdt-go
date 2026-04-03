@@ -3,7 +3,7 @@ package crdt
 import "testing"
 
 func TestLocalClock_Next(t *testing.T) {
-	lc := NewLocalClock(42)
+	lc := newLocalClock(42)
 	d1 := lc.Next()
 	d2 := lc.Next()
 	d3 := lc.Next()
@@ -20,7 +20,7 @@ func TestLocalClock_Next(t *testing.T) {
 }
 
 func TestLocalClock_Current(t *testing.T) {
-	lc := NewLocalClock(1)
+	lc := newLocalClock(1)
 	if lc.Current() != (Dot{1, 0}) {
 		t.Fatal("initial current should be {1,0}")
 	}
@@ -31,7 +31,7 @@ func TestLocalClock_Current(t *testing.T) {
 }
 
 func TestLocalClock_Counter(t *testing.T) {
-	lc := NewLocalClock(1)
+	lc := newLocalClock(1)
 	if lc.Counter() != 0 {
 		t.Fatal("initial counter should be 0")
 	}
@@ -43,14 +43,14 @@ func TestLocalClock_Counter(t *testing.T) {
 }
 
 func TestLocalClock_Replica(t *testing.T) {
-	lc := NewLocalClock(99)
+	lc := newLocalClock(99)
 	if lc.Replica() != 99 {
 		t.Fatalf("expected 99, got %d", lc.Replica())
 	}
 }
 
 func TestLocalClock_SetCounter(t *testing.T) {
-	lc := NewLocalClock(1)
+	lc := newLocalClock(1)
 	lc.SetCounter(10)
 	d := lc.Next()
 	if d != (Dot{1, 11}) {

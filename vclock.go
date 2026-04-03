@@ -10,8 +10,8 @@ import "hash/maphash"
 // concurrent use; the caller must provide synchronization if needed.
 type VClock map[ReplicaID]uint64
 
-// NewVClock returns an initialized empty vector clock.
-func NewVClock() VClock {
+// newVClock returns an initialized empty vector clock.
+func newVClock() VClock {
 	return make(VClock)
 }
 

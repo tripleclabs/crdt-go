@@ -1,10 +1,10 @@
 package crdt
 
-// DeltaInfo is the type-agnostic causal summary of a delta, extracted by a
-// CRDT storage type via [Mergeable.ParseDelta]. It carries enough information
-// for a [Clock] to decide domination and for [Replica] to update the
-// [ReceivedClock].
-type DeltaInfo struct {
+// deltaInfo is the type-agnostic causal summary of a delta, extracted by a
+// CRDT storage type via [mergeable.ParseDelta]. It carries enough information
+// for a [clock] to decide domination and for [replica] to update the
+// [receivedClock].
+type deltaInfo struct {
 	// Op is the operation code (e.g., OpPut, OpRemove).
 	Op byte
 	// Key is the target key or element identifier.
@@ -19,11 +19,11 @@ type DeltaInfo struct {
 	Dots []Dot
 }
 
-// Queryable lets a [Clock] inspect local CRDT state for comparison against
+// queryable lets a [clock] inspect local CRDT state for comparison against
 // an incoming delta. Backend-based types delegate to
 // [Backend.GetEntry]/[Backend.GetTombstone]; non-Backend types encode their
 // struct fields as bytes.
-type Queryable interface {
+type queryable interface {
 	// EntryMeta returns the causal metadata for the entry at key.
 	// Returns ok=false if no entry exists.
 	EntryMeta(key string) (meta []byte, ok bool)
@@ -33,24 +33,24 @@ type Queryable interface {
 	TombstoneMeta(key string) (meta []byte, ok bool)
 }
 
-// Clock determines whether a remote delta dominates local state. Each
+// clock determines whether a remote delta dominates local state. Each
 // implementation encapsulates a domination rule (LWW, add-wins, max-wins,
-// etc.). The [Replica] calls Allows before applying any delta.
-type Clock interface {
+// etc.). The [replica] calls Allows before applying any delta.
+type clock interface {
 	// Allows reports whether the remote delta described by info should be
 	// applied, given the local state accessible via local.
-	Allows(local Queryable, info DeltaInfo) bool
+	Allows(local queryable, info deltaInfo) bool
 }
 
-// Mergeable is implemented by each CRDT storage type. It combines
-// [Queryable] (for clock comparison) with delta parsing, application, and
+// mergeable is implemented by each CRDT storage type. It combines
+// [queryable] (for clock comparison) with delta parsing, application, and
 // anti-entropy encoding.
-type Mergeable interface {
-	Queryable
+type mergeable interface {
+	queryable
 
 	// ParseDelta extracts a [DeltaInfo] from raw delta bytes without
 	// modifying state.
-	ParseDelta(delta []byte) (DeltaInfo, error)
+	ParseDelta(delta []byte) (deltaInfo, error)
 
 	// Apply unconditionally merges a delta into local state. The caller
 	// must ensure [Clock.Allows] returned true before calling Apply.

@@ -2,22 +2,17 @@ package crdt
 
 import "encoding/binary"
 
-// GCounter is a grow-only counter. Each replica maintains its own
+// gCounterState is a grow-only counter. Each replica maintains its own
 // monotonically increasing count, and the total value is the sum.
 //
-// GCounter implements [Mergeable] for use with [Replica] and [MaxWinsClock].
-type GCounter struct {
+// gCounterState implements [mergeable] for use with [replica] and [maxWinsClock].
+type gCounterState struct {
 	counts map[ReplicaID]uint64
 }
 
-// NewGCounter returns an initialized GCounter.
-func NewGCounter() *GCounter {
-	return &GCounter{counts: make(map[ReplicaID]uint64)}
-}
-
-// NewGCounterReplica creates a [Replica] wrapping a [GCounter] with [MaxWinsClock].
-func NewGCounterReplica(replicaID ReplicaID) *Replica[*GCounter] {
-	return NewReplica[*GCounter](replicaID, NewGCounter(), MaxWinsClock{})
+// newGCounterState returns an initialized GCounter.
+func newGCounterState() *gCounterState {
+	return &gCounterState{counts: make(map[ReplicaID]uint64)}
 }
 
 // --- Mutations ---
@@ -26,7 +21,7 @@ func NewGCounterReplica(replicaID ReplicaID) *Replica[*GCounter] {
 // The caller must also update the Replica's LocalClock via SetCounter.
 //
 // Delta format: [8 bytes replica][8 bytes count]
-func (c *GCounter) Increment(replica ReplicaID, amount uint64) []byte {
+func (c *gCounterState) Increment(replica ReplicaID, amount uint64) []byte {
 	newCount := c.counts[replica] + amount
 	c.counts[replica] = newCount
 
@@ -39,17 +34,17 @@ func (c *GCounter) Increment(replica ReplicaID, amount uint64) []byte {
 // --- Reads ---
 
 // Set sets the count for a replica.
-func (c *GCounter) Set(replica ReplicaID, count uint64) {
+func (c *gCounterState) Set(replica ReplicaID, count uint64) {
 	c.counts[replica] = count
 }
 
 // Get returns the count for a replica.
-func (c *GCounter) Get(replica ReplicaID) uint64 {
+func (c *gCounterState) Get(replica ReplicaID) uint64 {
 	return c.counts[replica]
 }
 
 // Range calls fn for each replica-count pair.
-func (c *GCounter) Range(fn func(replica ReplicaID, count uint64) bool) {
+func (c *gCounterState) Range(fn func(replica ReplicaID, count uint64) bool) {
 	for r, v := range c.counts {
 		if !fn(r, v) {
 			return
@@ -58,7 +53,7 @@ func (c *GCounter) Range(fn func(replica ReplicaID, count uint64) bool) {
 }
 
 // Int64 returns the total count as int64 (sum of all replicas).
-func (c *GCounter) Int64() int64 {
+func (c *gCounterState) Int64() int64 {
 	var total uint64
 	for _, v := range c.counts {
 		total += v
@@ -67,7 +62,7 @@ func (c *GCounter) Int64() int64 {
 }
 
 // Len returns the number of replicas with counts.
-func (c *GCounter) Len() int {
+func (c *gCounterState) Len() int {
 	return len(c.counts)
 }
 
@@ -75,7 +70,7 @@ func (c *GCounter) Len() int {
 
 // EntryMeta returns the count for the given replica as 8-byte big-endian.
 // The key is the stringified replica ID.
-func (c *GCounter) EntryMeta(key string) ([]byte, bool) {
+func (c *gCounterState) EntryMeta(key string) ([]byte, bool) {
 	rid := parseReplicaKey(key)
 	count, ok := c.counts[rid]
 	if !ok {
@@ -87,20 +82,20 @@ func (c *GCounter) EntryMeta(key string) ([]byte, bool) {
 }
 
 // TombstoneMeta always returns false — GCounter has no tombstones.
-func (c *GCounter) TombstoneMeta(string) ([]byte, bool) {
+func (c *gCounterState) TombstoneMeta(string) ([]byte, bool) {
 	return nil, false
 }
 
 // --- Mergeable ---
 
-// ParseDelta extracts a [DeltaInfo] from a GCounter delta.
-func (c *GCounter) ParseDelta(delta []byte) (DeltaInfo, error) {
+// ParseDelta extracts a [deltaInfo] from a GCounter delta.
+func (c *gCounterState) ParseDelta(delta []byte) (deltaInfo, error) {
 	if len(delta) < 16 {
-		return DeltaInfo{}, ErrShortBuffer
+		return deltaInfo{}, errShortBuffer
 	}
 	replica := binary.BigEndian.Uint64(delta[0:8])
 	count := binary.BigEndian.Uint64(delta[8:16])
-	return DeltaInfo{
+	return deltaInfo{
 		Key:  formatReplicaKey(replica),
 		Meta: delta[8:16],
 		Dots: []Dot{{Replica: replica, Counter: count}},
@@ -108,9 +103,9 @@ func (c *GCounter) ParseDelta(delta []byte) (DeltaInfo, error) {
 }
 
 // Apply unconditionally sets the count for the replica in the delta.
-func (c *GCounter) Apply(delta []byte) error {
+func (c *gCounterState) Apply(delta []byte) error {
 	if len(delta) < 16 {
-		return ErrShortBuffer
+		return errShortBuffer
 	}
 	replica := binary.BigEndian.Uint64(delta[0:8])
 	count := binary.BigEndian.Uint64(delta[8:16])
@@ -119,7 +114,7 @@ func (c *GCounter) Apply(delta []byte) error {
 }
 
 // DeltasSince returns deltas for replicas with counts above peerHWM.
-func (c *GCounter) DeltasSince(peerHWM VClock) [][]byte {
+func (c *gCounterState) DeltasSince(peerHWM VClock) [][]byte {
 	var deltas [][]byte
 	for replica, count := range c.counts {
 		if count > peerHWM.Get(replica) {

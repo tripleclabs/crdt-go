@@ -1,25 +1,20 @@
 package crdt
 
-// LWWRegister stores a single value with a [Dot]. The dot records when
+// lwwRegisterState stores a single value with a [Dot]. The dot records when
 // and by whom the value was written.
 //
-// LWWRegister implements [Mergeable] for use with [Replica] and [LWWClock].
-type LWWRegister[V any] struct {
+// lwwRegisterState implements [mergeable] for use with [replica] and [lwwClock].
+type lwwRegisterState[V any] struct {
 	codec    Codec[V]
 	valBytes []byte
 	dot      Dot
 	hasVal   bool
 }
 
-// NewLWWRegister returns an initialized LWWRegister.
-func NewLWWRegister[V any](codec Codec[V]) *LWWRegister[V] {
+// newLWWRegisterState returns an initialized LWWRegister.
+func newLWWRegisterState[V any](codec Codec[V]) *lwwRegisterState[V] {
 	requireCodec(codec)
-	return &LWWRegister[V]{codec: codec}
-}
-
-// NewLWWRegisterReplica creates a [Replica] wrapping an [LWWRegister] with [LWWClock].
-func NewLWWRegisterReplica[V any](replicaID ReplicaID, codec Codec[V]) *Replica[*LWWRegister[V]] {
-	return NewReplica[*LWWRegister[V]](replicaID, NewLWWRegister(codec), LWWClock{})
+	return &lwwRegisterState[V]{codec: codec}
 }
 
 // --- Mutations ---
@@ -27,7 +22,7 @@ func NewLWWRegisterReplica[V any](replicaID ReplicaID, codec Codec[V]) *Replica[
 // Set stores a value with the given dot and returns the encoded delta.
 //
 // Delta format: [varint val len][val bytes][16 byte dot]
-func (r *LWWRegister[V]) Set(value V, dot Dot) ([]byte, error) {
+func (r *lwwRegisterState[V]) Set(value V, dot Dot) ([]byte, error) {
 	b, err := r.codec.Encode(value)
 	if err != nil {
 		return nil, err
@@ -37,13 +32,13 @@ func (r *LWWRegister[V]) Set(value V, dot Dot) ([]byte, error) {
 	r.hasVal = true
 
 	var buf []byte
-	buf = AppendVarintBytes(buf, b)
-	buf = append(buf, EncodeDot(dot)...)
+	buf = appendVarintBytes(buf, b)
+	buf = append(buf, encodeDot(dot)...)
 	return buf, nil
 }
 
 // SetBytes stores pre-encoded value bytes with the given dot.
-func (r *LWWRegister[V]) SetBytes(valBytes []byte, dot Dot) {
+func (r *lwwRegisterState[V]) SetBytes(valBytes []byte, dot Dot) {
 	r.valBytes = valBytes
 	r.dot = dot
 	r.hasVal = true
@@ -52,7 +47,7 @@ func (r *LWWRegister[V]) SetBytes(valBytes []byte, dot Dot) {
 // --- Reads ---
 
 // Get returns the current value, its dot, and whether a value has been set.
-func (r *LWWRegister[V]) Get() (V, Dot, bool) {
+func (r *lwwRegisterState[V]) Get() (V, Dot, bool) {
 	var zero V
 	if !r.hasVal {
 		return zero, Dot{}, false
@@ -65,7 +60,7 @@ func (r *LWWRegister[V]) Get() (V, Dot, bool) {
 }
 
 // GetBytes returns the raw encoded value, its dot, and whether set.
-func (r *LWWRegister[V]) GetBytes() ([]byte, Dot, bool) {
+func (r *lwwRegisterState[V]) GetBytes() ([]byte, Dot, bool) {
 	if !r.hasVal {
 		return nil, Dot{}, false
 	}
@@ -73,40 +68,40 @@ func (r *LWWRegister[V]) GetBytes() ([]byte, Dot, bool) {
 }
 
 // HasValue reports whether a value has been set.
-func (r *LWWRegister[V]) HasValue() bool { return r.hasVal }
+func (r *lwwRegisterState[V]) HasValue() bool { return r.hasVal }
 
 // --- Queryable ---
 
 // EntryMeta returns the encoded dot of the register's current value.
 // The key is ignored (registers are single-valued).
-func (r *LWWRegister[V]) EntryMeta(string) ([]byte, bool) {
+func (r *lwwRegisterState[V]) EntryMeta(string) ([]byte, bool) {
 	if !r.hasVal {
 		return nil, false
 	}
-	return EncodeDot(r.dot), true
+	return encodeDot(r.dot), true
 }
 
 // TombstoneMeta always returns false — LWWRegister has no tombstones.
-func (r *LWWRegister[V]) TombstoneMeta(string) ([]byte, bool) {
+func (r *lwwRegisterState[V]) TombstoneMeta(string) ([]byte, bool) {
 	return nil, false
 }
 
 // --- Mergeable ---
 
-// ParseDelta extracts a [DeltaInfo] from an LWWRegister delta.
-func (r *LWWRegister[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
-	_, off, err := ReadVarintBytes(delta, 0)
+// ParseDelta extracts a [deltaInfo] from an LWWRegister delta.
+func (r *lwwRegisterState[V]) ParseDelta(delta []byte) (deltaInfo, error) {
+	_, off, err := readVarintBytes(delta, 0)
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
 	if off+16 > len(delta) {
-		return DeltaInfo{}, ErrShortBuffer
+		return deltaInfo{}, errShortBuffer
 	}
-	dot, err := DecodeDot(delta[off:])
+	dot, err := decodeDot(delta[off:])
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
-	return DeltaInfo{
+	return deltaInfo{
 		Key:  "",
 		Meta: delta[off : off+16],
 		Dots: []Dot{dot},
@@ -114,15 +109,15 @@ func (r *LWWRegister[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
 }
 
 // Apply unconditionally sets the register to the delta's value and dot.
-func (r *LWWRegister[V]) Apply(delta []byte) error {
-	valBytes, off, err := ReadVarintBytes(delta, 0)
+func (r *lwwRegisterState[V]) Apply(delta []byte) error {
+	valBytes, off, err := readVarintBytes(delta, 0)
 	if err != nil {
 		return err
 	}
 	if off+16 > len(delta) {
-		return ErrShortBuffer
+		return errShortBuffer
 	}
-	remoteDot, err := DecodeDot(delta[off:])
+	remoteDot, err := decodeDot(delta[off:])
 	if err != nil {
 		return err
 	}
@@ -131,7 +126,7 @@ func (r *LWWRegister[V]) Apply(delta []byte) error {
 }
 
 // DeltasSince returns the register as a delta if the peer hasn't seen it.
-func (r *LWWRegister[V]) DeltasSince(peerHWM VClock) [][]byte {
+func (r *lwwRegisterState[V]) DeltasSince(peerHWM VClock) [][]byte {
 	if !r.hasVal {
 		return nil
 	}
@@ -139,7 +134,7 @@ func (r *LWWRegister[V]) DeltasSince(peerHWM VClock) [][]byte {
 		return nil
 	}
 	var buf []byte
-	buf = AppendVarintBytes(buf, r.valBytes)
-	buf = append(buf, EncodeDot(r.dot)...)
+	buf = appendVarintBytes(buf, r.valBytes)
+	buf = append(buf, encodeDot(r.dot)...)
 	return [][]byte{buf}
 }

@@ -3,7 +3,7 @@ package crdt
 import "testing"
 
 func TestReceivedClock_InOrder(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 2)
 	rc.Record(1, 3)
@@ -14,7 +14,7 @@ func TestReceivedClock_InOrder(t *testing.T) {
 }
 
 func TestReceivedClock_OutOfOrder(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 3) // gap: missing 1, 2
 	rc.Record(1, 1)
 	// hwm should be 1 (still missing 2)
@@ -29,7 +29,7 @@ func TestReceivedClock_OutOfOrder(t *testing.T) {
 }
 
 func TestReceivedClock_OutOfOrder_Large(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	// Receive 5, 3, 1, 4, 2
 	rc.Record(1, 5)
 	rc.Record(1, 3)
@@ -48,7 +48,7 @@ func TestReceivedClock_OutOfOrder_Large(t *testing.T) {
 }
 
 func TestReceivedClock_MultipleReplicas(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 2)
 	rc.Record(2, 1)
@@ -65,7 +65,7 @@ func TestReceivedClock_MultipleReplicas(t *testing.T) {
 }
 
 func TestReceivedClock_Duplicate(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 1) // duplicate
 	rc.Record(1, 1) // duplicate
@@ -75,7 +75,7 @@ func TestReceivedClock_Duplicate(t *testing.T) {
 }
 
 func TestReceivedClock_Zero(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 0) // should be no-op
 	if rc.Get(1) != 0 {
 		t.Fatal("counter 0 should be ignored")
@@ -83,7 +83,7 @@ func TestReceivedClock_Zero(t *testing.T) {
 }
 
 func TestReceivedClock_Covers(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 3) // pending
 
@@ -102,7 +102,7 @@ func TestReceivedClock_Covers(t *testing.T) {
 }
 
 func TestReceivedClock_HWM(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 2)
 	rc.Record(2, 1)
@@ -114,7 +114,7 @@ func TestReceivedClock_HWM(t *testing.T) {
 }
 
 func TestReceivedClock_SetHWM(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 4) // pending
 	rc.Record(1, 5) // pending
 	rc.SetHWM(1, 3) // set hwm to 3, pending has 4 and 5 → advances to 5
@@ -124,7 +124,7 @@ func TestReceivedClock_SetHWM(t *testing.T) {
 }
 
 func TestReceivedClock_SetHWM_WithGap(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 5) // pending, missing 4
 	rc.SetHWM(1, 3) // hwm to 3, but 4 is missing → stays at 3
 	if rc.Get(1) != 3 {
@@ -133,7 +133,7 @@ func TestReceivedClock_SetHWM_WithGap(t *testing.T) {
 }
 
 func TestReceivedClock_Clone(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 3) // pending
 
@@ -149,7 +149,7 @@ func TestReceivedClock_Clone(t *testing.T) {
 }
 
 func TestReceivedClock_BelowHWM(t *testing.T) {
-	rc := NewReceivedClock()
+	rc := newReceivedClock()
 	rc.Record(1, 1)
 	rc.Record(1, 2)
 	rc.Record(1, 3)

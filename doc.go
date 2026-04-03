@@ -1,50 +1,34 @@
-// Package crdt provides pure-Go CRDT data types with pluggable storage and
-// clock semantics.
-//
-// Each CRDT is composed of three orthogonal axes:
-//
-//   - Storage semantics: the data type ([LWWMap], [ORSet], etc.) backed by a
-//     pluggable [Backend] (in-memory or disk-backed via bbolt)
-//   - Clock semantics: the domination rule ([LWWClock], [AddWinsClock],
-//     [MaxWinsClock], [AlwaysMergeClock])
-//   - Merge semantics: how winning deltas are applied to storage
-//     ([Mergeable.Apply])
-//
-// A single generic [Replica] wraps any [Mergeable] type with clocks and
-// provides the replication surface: [Replica.ApplyDelta] for incoming deltas,
-// [Replica.DeltasSince] for anti-entropy, and [Replica.NextDot] for local
-// mutations.
+// Package crdt provides replicated data types that synchronize automatically
+// across peers. Pick a type, wire up a [Transport] and [TopologyProvider],
+// and mutations propagate without any manual sync.
 //
 // # CRDT Types
 //
-//   - [LWWMap]: Last-write-wins map (key → value + dot, with tombstones)
-//   - [ORSet]: Observed-remove set (element → dotmap)
-//   - [ORMap]: Observed-remove map (key → value + dotmap)
-//   - [AWLWWMap]: Add-wins LWW map (tombstones carry causal context)
-//   - [GList]: Grow-only list (append-only, causal ordering)
-//   - [GCounter]: Grow-only counter (replica → count)
+//   - [LWWMap]: Last-write-wins map
+//   - [ORSet]: Observed-remove set
+//   - [ORMap]: Observed-remove map
+//   - [AWLWWMap]: Add-wins LWW map
+//   - [GList]: Grow-only list
+//   - [GCounter]: Grow-only counter
 //   - [PNCounter]: Positive-negative counter
-//   - [LWWRegister]: Last-write-wins register (single value + dot)
-//   - [MVRegister]: Multi-value register (concurrent values + dots)
+//   - [LWWRegister]: Last-write-wins register
+//   - [MVRegister]: Multi-value register
 //
-// # Clock Strategies
+// # Configuration
 //
-//   - [LWWClock]: Higher dot wins ([DotGT])
-//   - [AddWinsClock]: Concurrent add beats concurrent remove
-//   - [MaxWinsClock]: Higher count wins
-//   - [AlwaysMergeClock]: Always apply (merge logic in [Mergeable.Apply])
+// All types accept functional [Option] values:
 //
-// # Causality Primitives
+//   - [WithTransport]: sets the network transport
+//   - [WithTopology]: sets the peer discovery provider
+//   - [WithBackend]: sets a custom storage backend (default: in-memory)
+//   - [WithWriteConcern]: sets quorum level ([WLocal], [WMajority], [WAll])
+//   - [WithAntiEntropyInterval]: sets background sync interval
 //
-//   - [Dot]: A single causal event (replica, counter)
-//   - [DotMap]: Compressed vector clock per element
-//   - [VClock]: Vector clock
-//   - [LocalClock]: Monotonic counter for a single replica
-//   - [ReceivedClock]: Tracks contiguous receipt per remote replica
+// Without a transport, types operate as local-only data structures.
 //
-// # Storage
+// # Write Concerns
 //
-// Collection types use a pluggable [Backend] interface. The default
-// [MemoryBackend] uses in-memory Go maps. Disk-backed implementations
-// (e.g., bbolt) enable CRDTs that exceed memory.
+// Mutations return a [*WriteResult]. Call [WriteResult.Wait] to block until
+// the configured quorum is reached. For [WLocal] (the default), Wait
+// returns immediately.
 package crdt

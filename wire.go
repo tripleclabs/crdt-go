@@ -14,33 +14,33 @@ import (
 
 // Op codes for delta wire format.
 const (
-	OpPut    byte = 0x01
-	OpRemove byte = 0x02
+	opPut    byte = 0x01
+	opRemove byte = 0x02
 )
 
 var (
-	// ErrShortBuffer indicates the byte slice is too short for the expected data.
-	ErrShortBuffer = errors.New("crdt: short buffer")
-	// ErrInvalidData indicates the byte slice contains invalid encoded data.
-	ErrInvalidData = errors.New("crdt: invalid data")
-	// ErrUnknownOp indicates an unknown operation code in a delta.
-	ErrUnknownOp = errors.New("crdt: unknown delta op")
+	// errShortBuffer indicates the byte slice is too short for the expected data.
+	errShortBuffer = errors.New("crdt: short buffer")
+	// errInvalidData indicates the byte slice contains invalid encoded data.
+	errInvalidData = errors.New("crdt: invalid data")
+	// errUnknownOp indicates an unknown operation code in a delta.
+	errUnknownOp = errors.New("crdt: unknown delta op")
 )
 
-// EncodeDot encodes a Dot as 16 bytes: 8 bytes replica (big-endian) + 8 bytes
+// encodeDot encodes a Dot as 16 bytes: 8 bytes replica (big-endian) + 8 bytes
 // counter (big-endian).
-func EncodeDot(d Dot) []byte {
+func encodeDot(d Dot) []byte {
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint64(buf[0:8], d.Replica)
 	binary.BigEndian.PutUint64(buf[8:16], d.Counter)
 	return buf
 }
 
-// DecodeDot decodes a Dot from 16 bytes. Returns an error if the buffer is
+// decodeDot decodes a Dot from 16 bytes. Returns an error if the buffer is
 // too short.
-func DecodeDot(b []byte) (Dot, error) {
+func decodeDot(b []byte) (Dot, error) {
 	if len(b) < 16 {
-		return Dot{}, ErrShortBuffer
+		return Dot{}, errShortBuffer
 	}
 	return Dot{
 		Replica: binary.BigEndian.Uint64(b[0:8]),
@@ -48,10 +48,10 @@ func DecodeDot(b []byte) (Dot, error) {
 	}, nil
 }
 
-// EncodeDotMap encodes a DotMap as a 4-byte entry count followed by 16 bytes
+// encodeDotMap encodes a DotMap as a 4-byte entry count followed by 16 bytes
 // per entry (8 bytes replica + 8 bytes counter). The encoding is deterministic:
 // entries are sorted by replica ID.
-func EncodeDotMap(dm DotMap) []byte {
+func encodeDotMap(dm DotMap) []byte {
 	n := len(dm)
 	buf := make([]byte, 4+n*16)
 	binary.BigEndian.PutUint32(buf[0:4], uint32(n))
@@ -67,15 +67,15 @@ func EncodeDotMap(dm DotMap) []byte {
 	return buf
 }
 
-// DecodeDotMap decodes a DotMap from bytes. Returns an error if the buffer
+// decodeDotMap decodes a DotMap from bytes. Returns an error if the buffer
 // is malformed.
-func DecodeDotMap(b []byte) (DotMap, error) {
+func decodeDotMap(b []byte) (DotMap, error) {
 	if len(b) < 4 {
-		return nil, ErrShortBuffer
+		return nil, errShortBuffer
 	}
 	n := int(binary.BigEndian.Uint32(b[0:4]))
 	if len(b) < 4+n*16 {
-		return nil, ErrShortBuffer
+		return nil, errShortBuffer
 	}
 	dm := make(DotMap, n)
 	off := 4
@@ -88,23 +88,23 @@ func DecodeDotMap(b []byte) (DotMap, error) {
 	return dm, nil
 }
 
-// EncodeVClock encodes a VClock. The format is identical to [EncodeDotMap]
+// encodeVClock encodes a VClock. The format is identical to [encodeDotMap]
 // since both are map[uint64]uint64.
-func EncodeVClock(vc VClock) []byte {
-	return EncodeDotMap(DotMap(vc))
+func encodeVClock(vc VClock) []byte {
+	return encodeDotMap(DotMap(vc))
 }
 
-// DecodeVClock decodes a VClock from bytes.
-func DecodeVClock(b []byte) (VClock, error) {
-	dm, err := DecodeDotMap(b)
+// decodeVClock decodes a VClock from bytes.
+func decodeVClock(b []byte) (VClock, error) {
+	dm, err := decodeDotMap(b)
 	if err != nil {
 		return nil, err
 	}
 	return VClock(dm), nil
 }
 
-// AppendVarintBytes appends a varint-length-prefixed byte slice to dst.
-func AppendVarintBytes(dst []byte, data []byte) []byte {
+// appendVarintBytes appends a varint-length-prefixed byte slice to dst.
+func appendVarintBytes(dst []byte, data []byte) []byte {
 	var buf [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(buf[:], uint64(len(data)))
 	dst = append(dst, buf[:n]...)
@@ -112,19 +112,19 @@ func AppendVarintBytes(dst []byte, data []byte) []byte {
 	return dst
 }
 
-// ReadVarintBytes reads a varint-length-prefixed byte slice from b at offset.
-func ReadVarintBytes(b []byte, offset int) ([]byte, int, error) {
+// readVarintBytes reads a varint-length-prefixed byte slice from b at offset.
+func readVarintBytes(b []byte, offset int) ([]byte, int, error) {
 	if offset >= len(b) {
-		return nil, offset, ErrShortBuffer
+		return nil, offset, errShortBuffer
 	}
 	length, n := binary.Uvarint(b[offset:])
 	if n <= 0 {
-		return nil, offset, ErrShortBuffer
+		return nil, offset, errShortBuffer
 	}
 	offset += n
 	end := offset + int(length)
 	if end > len(b) {
-		return nil, offset, ErrShortBuffer
+		return nil, offset, errShortBuffer
 	}
 	return b[offset:end], end, nil
 }

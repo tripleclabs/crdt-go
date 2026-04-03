@@ -3,14 +3,14 @@ package crdt
 import "testing"
 
 func TestNewMerkleMap(t *testing.T) {
-	mm := NewMerkleMap()
+	mm := newMerkleMap()
 	if mm.Len() != 0 {
 		t.Fatal("new merkle map should be empty")
 	}
 }
 
 func TestMerkleMap_PutGet(t *testing.T) {
-	mm := NewMerkleMap()
+	mm := newMerkleMap()
 	mm.Put("a", []byte("hello"))
 
 	v, ok := mm.Get("a")
@@ -28,7 +28,7 @@ func TestMerkleMap_PutGet(t *testing.T) {
 }
 
 func TestMerkleMap_Delete(t *testing.T) {
-	mm := NewMerkleMap()
+	mm := newMerkleMap()
 	mm.Put("a", []byte("hello"))
 	mm.Delete("a")
 	if mm.Len() != 0 {
@@ -40,7 +40,7 @@ func TestMerkleMap_Delete(t *testing.T) {
 }
 
 func TestMerkleMap_Len(t *testing.T) {
-	mm := NewMerkleMap()
+	mm := newMerkleMap()
 	mm.Put("a", []byte("1"))
 	mm.Put("b", []byte("2"))
 	if mm.Len() != 2 {
@@ -49,11 +49,11 @@ func TestMerkleMap_Len(t *testing.T) {
 }
 
 func TestMerkleMap_Hash(t *testing.T) {
-	a := NewMerkleMap()
+	a := newMerkleMap()
 	a.Put("x", []byte("1"))
 	a.Put("y", []byte("2"))
 
-	b := NewMerkleMap()
+	b := newMerkleMap()
 	b.seed = a.seed // use same seed for comparison
 	b.Put("y", []byte("2"))
 	b.Put("x", []byte("1"))
@@ -69,7 +69,7 @@ func TestMerkleMap_Hash(t *testing.T) {
 }
 
 func TestMerkleMap_HashDirty(t *testing.T) {
-	mm := NewMerkleMap()
+	mm := newMerkleMap()
 	mm.Put("a", []byte("1"))
 	h1 := mm.Hash()
 
@@ -82,10 +82,10 @@ func TestMerkleMap_HashDirty(t *testing.T) {
 }
 
 func TestMerkleMap_Equal(t *testing.T) {
-	a := NewMerkleMap()
+	a := newMerkleMap()
 	a.Put("x", []byte("1"))
 
-	b := NewMerkleMap()
+	b := newMerkleMap()
 	b.seed = a.seed
 	b.Put("x", []byte("1"))
 
@@ -100,8 +100,8 @@ func TestMerkleMap_Equal(t *testing.T) {
 }
 
 func TestMerkleMap_EqualEmpty(t *testing.T) {
-	a := NewMerkleMap()
-	b := NewMerkleMap()
+	a := newMerkleMap()
+	b := newMerkleMap()
 	b.seed = a.seed
 	if !a.Equal(b) {
 		t.Fatal("two empty maps should be equal")
@@ -109,12 +109,12 @@ func TestMerkleMap_EqualEmpty(t *testing.T) {
 }
 
 func TestMerkleMap_DivergentKeys(t *testing.T) {
-	a := NewMerkleMap()
+	a := newMerkleMap()
 	a.Put("x", []byte("1"))
 	a.Put("y", []byte("2"))
 	a.Put("z", []byte("3"))
 
-	b := NewMerkleMap()
+	b := newMerkleMap()
 	b.Put("x", []byte("1"))       // same
 	b.Put("y", []byte("changed")) // different value
 	b.Put("w", []byte("new"))     // only in b
@@ -131,10 +131,10 @@ func TestMerkleMap_DivergentKeys(t *testing.T) {
 }
 
 func TestMerkleMap_DivergentKeysIdentical(t *testing.T) {
-	a := NewMerkleMap()
+	a := newMerkleMap()
 	a.Put("x", []byte("1"))
 
-	b := NewMerkleMap()
+	b := newMerkleMap()
 	b.Put("x", []byte("1"))
 
 	divergent := a.DivergentKeys(b)
@@ -144,7 +144,7 @@ func TestMerkleMap_DivergentKeysIdentical(t *testing.T) {
 }
 
 func TestMerkleMap_ZeroValue(t *testing.T) {
-	var mm MerkleMap
+	var mm merkleMap
 	_, ok := mm.Get("x")
 	if ok {
 		t.Fatal("zero value should return false")

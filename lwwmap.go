@@ -1,29 +1,24 @@
 package crdt
 
-// LWWMap stores key → (value, [Dot]) entries and key → [Dot] tombstones,
+// lwwMapState stores key → (value, [Dot]) entries and key → [Dot] tombstones,
 // backed by a [Backend]. Values are encoded via the provided [Codec].
 //
-// LWWMap implements [Mergeable] for use with [Replica] and [LWWClock].
-type LWWMap[V any] struct {
+// lwwMapState implements [mergeable] for use with [replica] and [lwwClock].
+type lwwMapState[V any] struct {
 	codec   Codec[V]
 	backend Backend
 }
 
-// NewLWWMap returns an initialized LWWMap. Use [NewLWWMapReplica] to create
+// newLWWMapState returns an initialized LWWMap. Use [newLWWMapReplica] to create
 // a fully wired Replica.
-func NewLWWMap[V any](codec Codec[V], opts ...Option) *LWWMap[V] {
+func newLWWMapState[V any](codec Codec[V], opts ...Option) *lwwMapState[V] {
 	requireCodec(codec)
 	o := applyOptions(opts)
 	b := o.backend
 	if b == nil {
-		b = NewMemoryBackend()
+		b = newMemoryBackend()
 	}
-	return &LWWMap[V]{codec: codec, backend: b}
-}
-
-// NewLWWMapReplica creates a [Replica] wrapping an [LWWMap] with [LWWClock].
-func NewLWWMapReplica[V any](replicaID ReplicaID, codec Codec[V], opts ...Option) *Replica[*LWWMap[V]] {
-	return NewReplica[*LWWMap[V]](replicaID, NewLWWMap(codec, opts...), LWWClock{})
+	return &lwwMapState[V]{codec: codec, backend: b}
 }
 
 // --- Mutations (return delta bytes) ---
@@ -32,24 +27,24 @@ func NewLWWMapReplica[V any](replicaID ReplicaID, codec Codec[V], opts ...Option
 // the key. Returns the encoded delta to send to peers.
 //
 // Delta format: [op=0x01][varint key len][key][varint val len][val][16 byte dot]
-func (m *LWWMap[V]) Put(key string, value V, dot Dot) ([]byte, error) {
+func (m *lwwMapState[V]) Put(key string, value V, dot Dot) ([]byte, error) {
 	valBytes, err := m.codec.Encode(value)
 	if err != nil {
 		return nil, err
 	}
-	m.backend.PutEntry(key, valBytes, EncodeDot(dot))
+	m.backend.PutEntry(key, valBytes, encodeDot(dot))
 	m.backend.DeleteTombstone(key)
 
-	buf := []byte{OpPut}
-	buf = AppendVarintBytes(buf, []byte(key))
-	buf = AppendVarintBytes(buf, valBytes)
-	buf = append(buf, EncodeDot(dot)...)
+	buf := []byte{opPut}
+	buf = appendVarintBytes(buf, []byte(key))
+	buf = appendVarintBytes(buf, valBytes)
+	buf = append(buf, encodeDot(dot)...)
 	return buf, nil
 }
 
 // PutBytes stores pre-encoded value bytes with the given dot.
-func (m *LWWMap[V]) PutBytes(key string, valBytes []byte, dot Dot) {
-	m.backend.PutEntry(key, valBytes, EncodeDot(dot))
+func (m *lwwMapState[V]) PutBytes(key string, valBytes []byte, dot Dot) {
+	m.backend.PutEntry(key, valBytes, encodeDot(dot))
 	m.backend.DeleteTombstone(key)
 }
 
@@ -57,20 +52,20 @@ func (m *LWWMap[V]) PutBytes(key string, valBytes []byte, dot Dot) {
 // Returns the encoded delta to send to peers.
 //
 // Delta format: [op=0x02][varint key len][key][16 byte dot]
-func (m *LWWMap[V]) Remove(key string, dot Dot) []byte {
+func (m *lwwMapState[V]) Remove(key string, dot Dot) []byte {
 	m.backend.DeleteEntry(key)
-	m.backend.PutTombstone(key, EncodeDot(dot))
+	m.backend.PutTombstone(key, encodeDot(dot))
 
-	buf := []byte{OpRemove}
-	buf = AppendVarintBytes(buf, []byte(key))
-	buf = append(buf, EncodeDot(dot)...)
+	buf := []byte{opRemove}
+	buf = appendVarintBytes(buf, []byte(key))
+	buf = append(buf, encodeDot(dot)...)
 	return buf
 }
 
 // --- Reads ---
 
 // Get returns the value, its dot, and whether the key exists.
-func (m *LWWMap[V]) Get(key string) (V, Dot, bool) {
+func (m *lwwMapState[V]) Get(key string) (V, Dot, bool) {
 	var zero V
 	valBytes, metaBytes, ok := m.backend.GetEntry(key)
 	if !ok {
@@ -80,7 +75,7 @@ func (m *LWWMap[V]) Get(key string) (V, Dot, bool) {
 	if err != nil {
 		return zero, Dot{}, false
 	}
-	dot, err := DecodeDot(metaBytes)
+	dot, err := decodeDot(metaBytes)
 	if err != nil {
 		return zero, Dot{}, false
 	}
@@ -88,12 +83,12 @@ func (m *LWWMap[V]) Get(key string) (V, Dot, bool) {
 }
 
 // GetBytes returns the raw value bytes, dot, and whether the key exists.
-func (m *LWWMap[V]) GetBytes(key string) ([]byte, Dot, bool) {
+func (m *lwwMapState[V]) GetBytes(key string) ([]byte, Dot, bool) {
 	valBytes, metaBytes, ok := m.backend.GetEntry(key)
 	if !ok {
 		return nil, Dot{}, false
 	}
-	dot, err := DecodeDot(metaBytes)
+	dot, err := decodeDot(metaBytes)
 	if err != nil {
 		return nil, Dot{}, false
 	}
@@ -101,12 +96,12 @@ func (m *LWWMap[V]) GetBytes(key string) ([]byte, Dot, bool) {
 }
 
 // GetTombstone returns the dot for a tombstoned key.
-func (m *LWWMap[V]) GetTombstone(key string) (Dot, bool) {
+func (m *lwwMapState[V]) GetTombstone(key string) (Dot, bool) {
 	metaBytes, ok := m.backend.GetTombstone(key)
 	if !ok {
 		return Dot{}, false
 	}
-	dot, err := DecodeDot(metaBytes)
+	dot, err := decodeDot(metaBytes)
 	if err != nil {
 		return Dot{}, false
 	}
@@ -114,13 +109,13 @@ func (m *LWWMap[V]) GetTombstone(key string) (Dot, bool) {
 }
 
 // Range calls fn for each live entry.
-func (m *LWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
+func (m *lwwMapState[V]) Range(fn func(key string, value V, dot Dot) bool) {
 	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
 		v, err := m.codec.Decode(valBytes)
 		if err != nil {
 			return true // skip decode errors
 		}
-		dot, err := DecodeDot(metaBytes)
+		dot, err := decodeDot(metaBytes)
 		if err != nil {
 			return true // skip corrupted entry
 		}
@@ -129,9 +124,9 @@ func (m *LWWMap[V]) Range(fn func(key string, value V, dot Dot) bool) {
 }
 
 // RangeBytes calls fn for each live entry with raw value bytes.
-func (m *LWWMap[V]) RangeBytes(fn func(key string, valBytes []byte, dot Dot) bool) {
+func (m *lwwMapState[V]) RangeBytes(fn func(key string, valBytes []byte, dot Dot) bool) {
 	m.backend.RangeEntries(func(key string, valBytes []byte, metaBytes []byte) bool {
-		dot, err := DecodeDot(metaBytes)
+		dot, err := decodeDot(metaBytes)
 		if err != nil {
 			return true // skip corrupted entry
 		}
@@ -140,9 +135,9 @@ func (m *LWWMap[V]) RangeBytes(fn func(key string, valBytes []byte, dot Dot) boo
 }
 
 // RangeTombstones calls fn for each tombstone.
-func (m *LWWMap[V]) RangeTombstones(fn func(key string, dot Dot) bool) {
+func (m *lwwMapState[V]) RangeTombstones(fn func(key string, dot Dot) bool) {
 	m.backend.RangeTombstones(func(key string, metaBytes []byte) bool {
-		dot, err := DecodeDot(metaBytes)
+		dot, err := decodeDot(metaBytes)
 		if err != nil {
 			return true // skip corrupted entry
 		}
@@ -151,80 +146,80 @@ func (m *LWWMap[V]) RangeTombstones(fn func(key string, dot Dot) bool) {
 }
 
 // Len returns the number of live entries.
-func (m *LWWMap[V]) Len() int { return m.backend.EntryLen() }
+func (m *lwwMapState[V]) Len() int { return m.backend.EntryLen() }
 
 // TombstoneLen returns the number of tombstones.
-func (m *LWWMap[V]) TombstoneLen() int { return m.backend.TombstoneLen() }
+func (m *lwwMapState[V]) TombstoneLen() int { return m.backend.TombstoneLen() }
 
 // --- Queryable ---
 
 // EntryMeta returns the encoded dot for the entry at key.
-func (m *LWWMap[V]) EntryMeta(key string) ([]byte, bool) {
+func (m *lwwMapState[V]) EntryMeta(key string) ([]byte, bool) {
 	_, meta, ok := m.backend.GetEntry(key)
 	return meta, ok
 }
 
 // TombstoneMeta returns the encoded dot for the tombstone at key.
-func (m *LWWMap[V]) TombstoneMeta(key string) ([]byte, bool) {
+func (m *lwwMapState[V]) TombstoneMeta(key string) ([]byte, bool) {
 	return m.backend.GetTombstone(key)
 }
 
 // --- Mergeable ---
 
-// ParseDelta extracts a [DeltaInfo] from an encoded LWWMap delta.
-func (m *LWWMap[V]) ParseDelta(delta []byte) (DeltaInfo, error) {
+// ParseDelta extracts a [deltaInfo] from an encoded LWWMap delta.
+func (m *lwwMapState[V]) ParseDelta(delta []byte) (deltaInfo, error) {
 	if len(delta) < 1 {
-		return DeltaInfo{}, ErrShortBuffer
+		return deltaInfo{}, errShortBuffer
 	}
 	op := delta[0]
 	switch op {
-	case OpPut:
+	case opPut:
 		return m.parsePutDelta(delta[1:])
-	case OpRemove:
+	case opRemove:
 		return m.parseRemoveDelta(delta[1:])
 	default:
-		return DeltaInfo{}, ErrUnknownOp
+		return deltaInfo{}, errUnknownOp
 	}
 }
 
-func (m *LWWMap[V]) parsePutDelta(data []byte) (DeltaInfo, error) {
-	keyBytes, off, err := ReadVarintBytes(data, 0)
+func (m *lwwMapState[V]) parsePutDelta(data []byte) (deltaInfo, error) {
+	keyBytes, off, err := readVarintBytes(data, 0)
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
-	_, off, err = ReadVarintBytes(data, off)
+	_, off, err = readVarintBytes(data, off)
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
 	if off+16 > len(data) {
-		return DeltaInfo{}, ErrShortBuffer
+		return deltaInfo{}, errShortBuffer
 	}
-	dot, err := DecodeDot(data[off:])
+	dot, err := decodeDot(data[off:])
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
-	return DeltaInfo{
-		Op:   OpPut,
+	return deltaInfo{
+		Op:   opPut,
 		Key:  string(keyBytes),
 		Meta: data[off : off+16],
 		Dots: []Dot{dot},
 	}, nil
 }
 
-func (m *LWWMap[V]) parseRemoveDelta(data []byte) (DeltaInfo, error) {
-	keyBytes, off, err := ReadVarintBytes(data, 0)
+func (m *lwwMapState[V]) parseRemoveDelta(data []byte) (deltaInfo, error) {
+	keyBytes, off, err := readVarintBytes(data, 0)
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
 	if off+16 > len(data) {
-		return DeltaInfo{}, ErrShortBuffer
+		return deltaInfo{}, errShortBuffer
 	}
-	dot, err := DecodeDot(data[off:])
+	dot, err := decodeDot(data[off:])
 	if err != nil {
-		return DeltaInfo{}, err
+		return deltaInfo{}, err
 	}
-	return DeltaInfo{
-		Op:   OpRemove,
+	return deltaInfo{
+		Op:   opRemove,
 		Key:  string(keyBytes),
 		Meta: data[off : off+16],
 		Dots: []Dot{dot},
@@ -233,33 +228,33 @@ func (m *LWWMap[V]) parseRemoveDelta(data []byte) (DeltaInfo, error) {
 
 // Apply unconditionally merges a delta into the LWWMap. The caller must
 // ensure the clock has already approved the delta.
-func (m *LWWMap[V]) Apply(delta []byte) error {
+func (m *lwwMapState[V]) Apply(delta []byte) error {
 	if len(delta) < 1 {
-		return ErrShortBuffer
+		return errShortBuffer
 	}
 	switch delta[0] {
-	case OpPut:
+	case opPut:
 		return m.applyPut(delta[1:])
-	case OpRemove:
+	case opRemove:
 		return m.applyRemove(delta[1:])
 	default:
-		return ErrUnknownOp
+		return errUnknownOp
 	}
 }
 
-func (m *LWWMap[V]) applyPut(data []byte) error {
-	keyBytes, off, err := ReadVarintBytes(data, 0)
+func (m *lwwMapState[V]) applyPut(data []byte) error {
+	keyBytes, off, err := readVarintBytes(data, 0)
 	if err != nil {
 		return err
 	}
-	valBytes, off, err := ReadVarintBytes(data, off)
+	valBytes, off, err := readVarintBytes(data, off)
 	if err != nil {
 		return err
 	}
 	if off+16 > len(data) {
-		return ErrShortBuffer
+		return errShortBuffer
 	}
-	remoteDot, err := DecodeDot(data[off:])
+	remoteDot, err := decodeDot(data[off:])
 	if err != nil {
 		return err
 	}
@@ -267,15 +262,15 @@ func (m *LWWMap[V]) applyPut(data []byte) error {
 	return nil
 }
 
-func (m *LWWMap[V]) applyRemove(data []byte) error {
-	keyBytes, off, err := ReadVarintBytes(data, 0)
+func (m *lwwMapState[V]) applyRemove(data []byte) error {
+	keyBytes, off, err := readVarintBytes(data, 0)
 	if err != nil {
 		return err
 	}
 	if off+16 > len(data) {
-		return ErrShortBuffer
+		return errShortBuffer
 	}
-	remoteDot, err := DecodeDot(data[off:])
+	remoteDot, err := decodeDot(data[off:])
 	if err != nil {
 		return err
 	}
@@ -285,15 +280,15 @@ func (m *LWWMap[V]) applyRemove(data []byte) error {
 
 // DeltasSince returns encoded deltas for entries and tombstones with dots
 // not covered by peerHWM.
-func (m *LWWMap[V]) DeltasSince(peerHWM VClock) [][]byte {
+func (m *lwwMapState[V]) DeltasSince(peerHWM VClock) [][]byte {
 	var deltas [][]byte
 
 	m.RangeBytes(func(key string, valBytes []byte, dot Dot) bool {
 		if dot.Counter > peerHWM.Get(dot.Replica) {
-			buf := []byte{OpPut}
-			buf = AppendVarintBytes(buf, []byte(key))
-			buf = AppendVarintBytes(buf, valBytes)
-			buf = append(buf, EncodeDot(dot)...)
+			buf := []byte{opPut}
+			buf = appendVarintBytes(buf, []byte(key))
+			buf = appendVarintBytes(buf, valBytes)
+			buf = append(buf, encodeDot(dot)...)
 			deltas = append(deltas, buf)
 		}
 		return true
@@ -301,9 +296,9 @@ func (m *LWWMap[V]) DeltasSince(peerHWM VClock) [][]byte {
 
 	m.RangeTombstones(func(key string, dot Dot) bool {
 		if dot.Counter > peerHWM.Get(dot.Replica) {
-			buf := []byte{OpRemove}
-			buf = AppendVarintBytes(buf, []byte(key))
-			buf = append(buf, EncodeDot(dot)...)
+			buf := []byte{opRemove}
+			buf = appendVarintBytes(buf, []byte(key))
+			buf = append(buf, encodeDot(dot)...)
 			deltas = append(deltas, buf)
 		}
 		return true

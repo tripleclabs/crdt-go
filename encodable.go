@@ -35,7 +35,7 @@ func (Int64Codec) Encode(i int64) ([]byte, error) {
 }
 func (Int64Codec) Decode(b []byte) (int64, error) {
 	if len(b) < 8 {
-		return 0, ErrShortBuffer
+		return 0, errShortBuffer
 	}
 	return int64(binary.BigEndian.Uint64(b)), nil
 }
@@ -50,7 +50,7 @@ func (Uint64Codec) Encode(u uint64) ([]byte, error) {
 }
 func (Uint64Codec) Decode(b []byte) (uint64, error) {
 	if len(b) < 8 {
-		return 0, ErrShortBuffer
+		return 0, errShortBuffer
 	}
 	return binary.BigEndian.Uint64(b), nil
 }
