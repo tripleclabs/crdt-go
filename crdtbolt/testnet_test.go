@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/3clabs/crdt"
+	"github.com/tripleclabs/crdt-go"
 )
 
 type testNet struct {

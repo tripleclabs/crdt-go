@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/3clabs/crdt"
+	"github.com/tripleclabs/crdt-go"
 )
 
 func tempDB(t *testing.T) *BoltBackend {

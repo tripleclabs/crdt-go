@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3clabs/crdt"
+	"github.com/tripleclabs/crdt-go"
 )
 
 func eventually(t *testing.T, timeout time.Duration, check func() bool) {

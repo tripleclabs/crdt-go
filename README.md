@@ -3,13 +3,13 @@
 Pure-Go CRDT library. Pick a type, wire up a transport, and state synchronizes automatically.
 
 ```
-go get github.com/3clabs/crdt
+go get github.com/tripleclabs/crdt-go
 ```
 
 ## Quick start
 
 ```go
-import "github.com/3clabs/crdt"
+import "github.com/tripleclabs/crdt-go"
 
 // Create two nodes connected via your transport.
 a := crdt.NewLWWMap[string](1, crdt.StringCodec{},
@@ -272,7 +272,7 @@ m := crdt.NewLWWMap[User](id, UserCodec{}, opts...)
 Collection types use a pluggable `Backend` for storage. The default is in-memory. The `crdtbolt` sub-module provides bbolt-backed persistence:
 
 ```go
-import "github.com/3clabs/crdt/crdtbolt"
+import "github.com/tripleclabs/crdt-go/crdtbolt"
 
 backend, _ := crdtbolt.Open("/path/to/data.db")
 defer backend.Close()
